@@ -29,16 +29,15 @@ def valor_extenso(value):
 
 class CopyModelAtaGenerator:
     """
-    LicitaSuite Web 3.2 LTS
+    LicitaSuite Web 3.1 LTS
 
-    Ajustes finais:
-    - assinatura com padrão de nome do fornecedor em Title Case;
-    - dados do fornecedor sem inventar informação;
-    - largura/altura preservadas por clonagem da linha do modelo;
-    - apêndice com colunas e textos originais preservados;
-    - nome do arquivo limpo e sem sufixos do Portal;
-    - quantitativo sem vírgula decimal indevida;
-    - valores mapeados pelo cabeçalho real.
+    Correções:
+    - Quantitativo sem conversão indevida para decimal.
+    - Colunas mapeadas pelo cabeçalho real do modelo.
+    - Compatível com modelos com ou sem coluna MODELO.
+    - Valor total posicionado na última coluna correta.
+    - Descrição com negrito apenas até " - ".
+    - Preserva linhas clonadas do modelo.
     """
 
     def __init__(self, modelo_path, output_dir="output/atas_geradas"):
@@ -74,13 +73,11 @@ class CopyModelAtaGenerator:
         self.replace_total_paragraph(doc, ata)
         self.replace_appendix(doc, ata)
         self.replace_signature(doc, ata)
-        self.fix_table_layouts(doc)
 
-        out = self.output_dir / self.make_filename(ata.fornecedor_nome)
+        out = self.output_dir / f"ATA DE REGISTRO DE PREÇOS - {safe_filename(ata.fornecedor_nome)}.docx"
         doc.save(out)
         return out
 
-    # ---------------- PROCESSO ----------------
     def extract_process(self, doc):
         text = "\n".join(p.text for p in doc.paragraphs[:30])
         processo = self._find(text, r"PROCESSO LICITAT[ÓO]RIO\s*N[º°]?\s*([0-9]+/20[0-9]{2})", "")
@@ -91,50 +88,16 @@ class CopyModelAtaGenerator:
         m = re.search(pattern, text, flags=re.I)
         return m.group(1) if m else default
 
-    # ---------------- FORNECEDOR ----------------
     def val(self, value):
         t = "" if value is None else str(value).strip()
         return t if t else NA
 
-    def clean_supplier_name(self, name):
-        name = self.val(name)
-        # remove resíduos do Portal de Compras
-        cuts = [" | Tipo:", " - LC123:", " - Documento", " Documento "]
-        for c in cuts:
-            if c in name:
-                name = name.split(c, 1)[0]
-        bad = [
-            "A autenticidade do documento pode ser verificada",
-            "Documento gerado eletronicamente",
-            "Código verificador",
-            "Página "
-        ]
-        for b in bad:
-            if name.lower().startswith(b.lower()):
-                return NA
-        return " ".join(name.split()).strip()
-
-    def title_supplier(self, name):
-        name = self.clean_supplier_name(name)
-        if name == NA:
-            return name
-        keep_upper = {"LTDA", "S.A", "SA", "ME", "EPP", "EIRELI", "S/A"}
-        parts = []
-        for word in name.split():
-            w = word.strip()
-            if w.upper().replace(".", "") in {x.replace(".", "") for x in keep_upper}:
-                parts.append(w.upper())
-            else:
-                parts.append(w[:1].upper() + w[1:].lower())
-        return " ".join(parts)
-
     def replace_intro(self, doc, ata, processo, pregao):
-        fornecedor = self.clean_supplier_name(ata.fornecedor_nome)
         text = (
             "O CONSÓRCIO PÚBLICO INSTITUIÇÃO DE COOPERAÇÃO INTERMUNICIPAL DO MÉDIO PARAOPEBA - ICISMEP, "
             "CNPJ Nº 05.802.877/0001-10, órgão gerenciador, com sede na Rua Orquídeas, nº 489, Bairro Flor de Minas, "
             "no Município de São Joaquim de Bicas, Estado de Minas Gerais, CEP 32.920-000, a seguir denominado Consórcio ICISMEP, "
-            f"neste ato representado por seu diretor institucional Sr. Eustáquio da Abadia Amaral e {fornecedor}, "
+            f"neste ato representado por seu diretor institucional Sr. Eustáquio da Abadia Amaral e {self.val(ata.fornecedor_nome)}, "
             f"com sede/endereço {self.val(ata.endereco)}, Município {self.val(ata.municipio)}/{self.val(ata.uf)}, "
             f"CEP {self.val(ata.cep)}, telefone {self.val(ata.telefone)}, e-mail {self.val(ata.email)}, "
             f"inscrita no CNPJ sob o nº {self.val(ata.fornecedor_cnpj)}, Inscrição Estadual nº {self.val(ata.inscricao_estadual)}, "
@@ -151,14 +114,13 @@ class CopyModelAtaGenerator:
                 self.set_paragraph_text_preserving_first_run(p, text)
                 return
 
-    # ---------------- TABELA CLÁUSULA 4 ----------------
     def replace_price_table(self, doc, ata):
         table = self.find_price_table(doc)
         if table is None:
             return
 
         mapping = self.map_header_columns(table.rows[0])
-        data_idx = self.find_first_data_row_index(table)
+        data_idx = 1 if len(table.rows) > 1 else 0
         data_template = deepcopy(table.rows[data_idx]._tr)
 
         while len(table.rows) > 1:
@@ -168,7 +130,6 @@ class CopyModelAtaGenerator:
             table._tbl.append(deepcopy(data_template))
             row = table.rows[-1]
             self.clear_row(row)
-            self.apply_row_height(row, compact=False)
 
             self.put(row, mapping, "siplan", item.codigo_siplan)
             self.put(row, mapping, "item", str(item.numero_item))
@@ -178,6 +139,7 @@ class CopyModelAtaGenerator:
 
             marca_text = item.marca or item.fabricante or ""
             modelo_text = item.modelo or ""
+
             if "modelo" not in mapping and modelo_text:
                 marca_text = (marca_text + " " + modelo_text).strip()
 
@@ -190,16 +152,6 @@ class CopyModelAtaGenerator:
         total_row = table.rows[-1]
         self.clear_row(total_row)
         self.write_total(total_row, mapping, ata.valor_total)
-
-    def find_first_data_row_index(self, table):
-        # procura primeira linha não-cabeçalho que pareça linha de item
-        for i in range(1, len(table.rows)):
-            text = normalize_text(" ".join(c.text for c in table.rows[i].cells))
-            if "VALOR TOTAL" in text:
-                continue
-            if any(ch.isdigit() for ch in text) or i == 1:
-                return i
-        return 1 if len(table.rows) > 1 else 0
 
     def map_header_columns(self, row):
         mapping = {}
@@ -249,6 +201,7 @@ class CopyModelAtaGenerator:
         cells = row.cells
         if not cells:
             return
+
         last_idx = mapping.get("preco_total", len(cells) - 1)
         last_idx = min(last_idx, len(cells) - 1)
 
@@ -263,12 +216,12 @@ class CopyModelAtaGenerator:
             self.bold(label)
             self.bold(cells[last_idx])
             self.horizontal(label)
-            self.apply_row_height(row, compact=True)
+            row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
+            row.height = Cm(0.55)
         except Exception:
             self.set_cell_text(cells[0], "VALOR TOTAL:")
             self.set_cell_text(cells[-1], format_money(total, 2))
 
-    # ---------------- TOTAL POR EXTENSO ----------------
     def replace_total_paragraph(self, doc, ata):
         txt = f"4.2 Valor total dos preços registrados: {format_money(ata.valor_total, 2)} ({valor_extenso(ata.valor_total)})."
         for p in doc.paragraphs:
@@ -276,13 +229,12 @@ class CopyModelAtaGenerator:
                 self.set_paragraph_text_preserving_first_run(p, txt)
                 return
 
-    # ---------------- APÊNDICE ----------------
     def replace_appendix(self, doc, ata):
         table = self.find_appendix_table(doc)
         if table is None:
             return
 
-        data_idx = self.find_first_appendix_data_row_index(table)
+        data_idx = 1 if len(table.rows) > 1 else 0
         data_template = deepcopy(table.rows[data_idx]._tr)
 
         while len(table.rows) > 1:
@@ -292,8 +244,6 @@ class CopyModelAtaGenerator:
             table._tbl.append(deepcopy(data_template))
             row = table.rows[-1]
             self.clear_row(row)
-            self.apply_row_height(row, compact=False)
-
             values = item.appendix_cells_text or [
                 item.codigo_siplan,
                 str(item.numero_item),
@@ -301,16 +251,12 @@ class CopyModelAtaGenerator:
                 item.apresentacao,
                 format_qty(item.quantidade),
             ]
-
             for i, v in enumerate(values):
                 if i < len(row.cells):
                     if i == 2:
                         self.set_description_cell(row.cells[i], v)
                     else:
                         self.set_cell_text(row.cells[i], v)
-
-    def find_first_appendix_data_row_index(self, table):
-        return 1 if len(table.rows) > 1 else 0
 
     def find_appendix_table(self, doc):
         best = None
@@ -326,64 +272,14 @@ class CopyModelAtaGenerator:
                 best, score_best = t, score
         return best if score_best >= 5 else None
 
-    # ---------------- ASSINATURA ----------------
     def replace_signature(self, doc, ata):
-        fornecedor = self.title_supplier(ata.fornecedor_nome)
-        representante = self.val(ata.representante)
-        assinatura = f"{representante}\n{fornecedor}"
-
-        # preferência: tabela de assinatura (duas colunas, perto do fim)
-        for table in reversed(doc.tables):
-            text = normalize_text(" ".join(c.text for r in table.rows for c in r.cells))
-            if "EUSTAQUIO" in text or "ICISMEP" in text or "CONTRATADA" in text or "FORNECEDOR" in text:
-                try:
-                    cell = table.rows[-1].cells[-1]
-                    self.set_cell_text(cell, assinatura)
-                    self.center(cell)
-                    return
-                except Exception:
-                    pass
-
-        # fallback: terceira tabela, última célula
+        txt = f"{self.val(ata.representante)}\n{ata.fornecedor_nome.title()}"
         if len(doc.tables) >= 3:
             try:
-                cell = doc.tables[2].rows[0].cells[-1]
-                self.set_cell_text(cell, assinatura)
-                self.center(cell)
+                self.set_cell_text(doc.tables[2].rows[0].cells[-1], txt)
             except Exception:
                 pass
 
-    # ---------------- NOMENCLATURA ----------------
-    def make_filename(self, fornecedor_nome):
-        name = self.clean_supplier_name(fornecedor_nome)
-        name = safe_filename(name)
-        if not name or name == NA:
-            name = "FORNECEDOR_NAO_IDENTIFICADO"
-        return f"ATA DE REGISTRO DE PREÇOS - {name}.docx"
-
-    # ---------------- LAYOUT ----------------
-    def fix_table_layouts(self, doc):
-        for table in doc.tables:
-            try:
-                table.autofit = False
-            except Exception:
-                pass
-            for row in table.rows:
-                for cell in row.cells:
-                    cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
-
-    def apply_row_height(self, row, compact=False):
-        try:
-            if compact:
-                row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
-                row.height = Cm(0.55)
-            else:
-                # deixa automático para não cortar descrição extensa
-                row.height_rule = WD_ROW_HEIGHT_RULE.AUTO
-        except Exception:
-            pass
-
-    # ---------------- TEXTO/CÉLULAS ----------------
     def clear_row(self, row):
         for c in row.cells:
             self.set_cell_text(c, "")
@@ -428,8 +324,6 @@ class CopyModelAtaGenerator:
             runs = [r1, r2]
         else:
             r = p.add_run(text)
-            # quando não há separador, respeita regra: não tornar documento todo em negrito,
-            # mas mantém descrição curta destacada.
             r.bold = True
             runs = [r]
 
