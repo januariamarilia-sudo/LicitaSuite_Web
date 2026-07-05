@@ -29,15 +29,14 @@ def valor_extenso(value):
 
 class CopyModelAtaGenerator:
     """
-    LicitaSuite Web 3.1 LTS
+    LicitaSuite Web 3.1.2 LTS
 
-    Correções:
-    - Quantitativo sem conversão indevida para decimal.
-    - Colunas mapeadas pelo cabeçalho real do modelo.
-    - Compatível com modelos com ou sem coluna MODELO.
-    - Valor total posicionado na última coluna correta.
-    - Descrição com negrito apenas até " - ".
-    - Preserva linhas clonadas do modelo.
+    Base: 3.1.1 Rollback + Cor.
+
+    Correções pontuais:
+    - Mantém a tabela da cláusula 4 depois do parágrafo 4.1.
+    - Restaura negritos principais no parágrafo inicial.
+    - Não altera largura, altura ou estrutura da tabela.
     """
 
     def __init__(self, modelo_path, output_dir="output/atas_geradas"):
@@ -70,13 +69,22 @@ class CopyModelAtaGenerator:
 
         self.replace_intro(doc, ata, processo, pregao)
         self.replace_price_table(doc, ata)
+        self.ensure_price_table_after_41(doc)
         self.replace_total_paragraph(doc, ata)
         self.replace_appendix(doc, ata)
         self.replace_signature(doc, ata)
 
-        out = self.output_dir / f"ATA DE REGISTRO DE PREÇOS - {safe_filename(ata.fornecedor_nome)}.docx"
+        fornecedor = self.clean_supplier_name(ata.fornecedor_nome)
+        out = self.output_dir / f"ATA DE REGISTRO DE PREÇOS - {safe_filename(fornecedor)}.docx"
         doc.save(out)
         return out
+
+    def clean_supplier_name(self, name):
+        name = "" if name is None else str(name).strip()
+        for marker in [" | Tipo:", " - LC123:", " - Documento", " Documento "]:
+            if marker in name:
+                name = name.split(marker, 1)[0]
+        return " ".join(name.split()) or "FORNECEDOR_NAO_IDENTIFICADO"
 
     def extract_process(self, doc):
         text = "\n".join(p.text for p in doc.paragraphs[:30])
@@ -93,11 +101,12 @@ class CopyModelAtaGenerator:
         return t if t else NA
 
     def replace_intro(self, doc, ata, processo, pregao):
+        fornecedor = self.clean_supplier_name(ata.fornecedor_nome)
         text = (
             "O CONSÓRCIO PÚBLICO INSTITUIÇÃO DE COOPERAÇÃO INTERMUNICIPAL DO MÉDIO PARAOPEBA - ICISMEP, "
             "CNPJ Nº 05.802.877/0001-10, órgão gerenciador, com sede na Rua Orquídeas, nº 489, Bairro Flor de Minas, "
             "no Município de São Joaquim de Bicas, Estado de Minas Gerais, CEP 32.920-000, a seguir denominado Consórcio ICISMEP, "
-            f"neste ato representado por seu diretor institucional Sr. Eustáquio da Abadia Amaral e {self.val(ata.fornecedor_nome)}, "
+            f"neste ato representado por seu diretor institucional Sr. Eustáquio da Abadia Amaral e {fornecedor}, "
             f"com sede/endereço {self.val(ata.endereco)}, Município {self.val(ata.municipio)}/{self.val(ata.uf)}, "
             f"CEP {self.val(ata.cep)}, telefone {self.val(ata.telefone)}, e-mail {self.val(ata.email)}, "
             f"inscrita no CNPJ sob o nº {self.val(ata.fornecedor_cnpj)}, Inscrição Estadual nº {self.val(ata.inscricao_estadual)}, "
@@ -111,9 +120,41 @@ class CopyModelAtaGenerator:
         for p in doc.paragraphs:
             n = normalize_text(p.text)
             if "CONSORCIO PUBLICO" in n and "RESOLVEM REGISTRAR" in n:
-                self.set_paragraph_text_preserving_first_run(p, text)
+                self.set_intro_paragraph_with_bold(p, text, fornecedor, processo, pregao)
                 return
 
+    def set_intro_paragraph_with_bold(self, p, text, fornecedor, processo, pregao):
+        """
+        Recria apenas os runs do parágrafo inicial para restaurar os negritos principais.
+        Não mexe no restante do documento.
+        """
+        bold_terms = [
+            "O CONSÓRCIO PÚBLICO INSTITUIÇÃO DE COOPERAÇÃO INTERMUNICIPAL DO MÉDIO PARAOPEBA - ICISMEP",
+            "Eustáquio da Abadia Amaral",
+            fornecedor,
+            f"PROCESSO LICITATÓRIO Nº {processo}",
+            f"PREGÃO ELETRÔNICO Nº {pregao}",
+        ]
+
+        # captura estilo base do primeiro run
+        base_run = p.runs[0] if p.runs else None
+        for r in list(p.runs):
+            r.text = ""
+
+        pos = 0
+        pattern = "(" + "|".join(re.escape(t) for t in bold_terms if t and t != NA) + ")"
+        parts = re.split(pattern, text)
+
+        for part in parts:
+            if not part:
+                continue
+            run = p.add_run(part)
+            if base_run is not None:
+                run.font.name = base_run.font.name
+                run.font.size = base_run.font.size
+            run.bold = part in bold_terms
+
+    # ------------------- TABELA CLÁUSULA 4 -------------------
     def replace_price_table(self, doc, ata):
         table = self.find_price_table(doc)
         if table is None:
@@ -129,7 +170,7 @@ class CopyModelAtaGenerator:
         for item in ata.itens:
             table._tbl.append(deepcopy(data_template))
             row = table.rows[-1]
-            self.clear_row(row)
+            self.clear_row_text_only(row)
 
             self.put(row, mapping, "siplan", item.codigo_siplan)
             self.put(row, mapping, "item", str(item.numero_item))
@@ -150,8 +191,40 @@ class CopyModelAtaGenerator:
 
         table._tbl.append(deepcopy(data_template))
         total_row = table.rows[-1]
-        self.clear_row(total_row)
+        self.clear_row_text_only(total_row)
         self.write_total(total_row, mapping, ata.valor_total)
+
+    def ensure_price_table_after_41(self, doc):
+        """
+        Corrige somente a posição:
+        no modelo correto, a ordem é:
+        4 DOS PREÇOS REGISTRADOS
+        4.1 Os preços...
+        TABELA
+        4.2 Valor total...
+        """
+        table = self.find_price_table(doc)
+        if table is None:
+            return
+
+        p41 = None
+        for p in doc.paragraphs:
+            if normalize_text(p.text).startswith("4.1 OS PRECOS REGISTRADOS"):
+                p41 = p
+                break
+        if p41 is None:
+            return
+
+        # Move o XML da tabela para imediatamente depois do parágrafo 4.1.
+        tbl = table._tbl
+        parent = tbl.getparent()
+        if parent is None:
+            return
+        try:
+            parent.remove(tbl)
+            p41._p.addnext(tbl)
+        except Exception:
+            pass
 
     def map_header_columns(self, row):
         mapping = {}
@@ -186,7 +259,7 @@ class CopyModelAtaGenerator:
         if description:
             self.set_description_cell(row.cells[idx], value)
         else:
-            self.set_cell_text(row.cells[idx], value)
+            self.set_cell_text_keep_style(row.cells[idx], value)
 
     def find_price_table(self, doc):
         for t in doc.tables:
@@ -209,8 +282,8 @@ class CopyModelAtaGenerator:
             label = cells[0]
             for i in range(1, last_idx):
                 label = label.merge(cells[i])
-            self.set_cell_text(label, "VALOR TOTAL:")
-            self.set_cell_text(cells[last_idx], format_money(total, 2))
+            self.set_cell_text_keep_style(label, "VALOR TOTAL:")
+            self.set_cell_text_keep_style(cells[last_idx], format_money(total, 2))
             self.center(label)
             self.center(cells[last_idx])
             self.bold(label)
@@ -219,16 +292,17 @@ class CopyModelAtaGenerator:
             row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
             row.height = Cm(0.55)
         except Exception:
-            self.set_cell_text(cells[0], "VALOR TOTAL:")
-            self.set_cell_text(cells[-1], format_money(total, 2))
+            self.set_cell_text_keep_style(cells[0], "VALOR TOTAL:")
+            self.set_cell_text_keep_style(cells[-1], format_money(total, 2))
 
     def replace_total_paragraph(self, doc, ata):
         txt = f"4.2 Valor total dos preços registrados: {format_money(ata.valor_total, 2)} ({valor_extenso(ata.valor_total)})."
         for p in doc.paragraphs:
             if "Valor total dos preços registrados" in p.text:
-                self.set_paragraph_text_preserving_first_run(p, txt)
+                self.set_paragraph_text_keep_style(p, txt)
                 return
 
+    # ------------------- APÊNDICE -------------------
     def replace_appendix(self, doc, ata):
         table = self.find_appendix_table(doc)
         if table is None:
@@ -243,7 +317,8 @@ class CopyModelAtaGenerator:
         for item in ata.itens:
             table._tbl.append(deepcopy(data_template))
             row = table.rows[-1]
-            self.clear_row(row)
+            self.clear_row_text_only(row)
+
             values = item.appendix_cells_text or [
                 item.codigo_siplan,
                 str(item.numero_item),
@@ -251,12 +326,13 @@ class CopyModelAtaGenerator:
                 item.apresentacao,
                 format_qty(item.quantidade),
             ]
+
             for i, v in enumerate(values):
                 if i < len(row.cells):
                     if i == 2:
                         self.set_description_cell(row.cells[i], v)
                     else:
-                        self.set_cell_text(row.cells[i], v)
+                        self.set_cell_text_keep_style(row.cells[i], v)
 
     def find_appendix_table(self, doc):
         best = None
@@ -273,19 +349,21 @@ class CopyModelAtaGenerator:
         return best if score_best >= 5 else None
 
     def replace_signature(self, doc, ata):
-        txt = f"{self.val(ata.representante)}\n{ata.fornecedor_nome.title()}"
+        txt = f"{self.val(ata.representante)}\n{self.clean_supplier_name(ata.fornecedor_nome).title()}"
         if len(doc.tables) >= 3:
             try:
-                self.set_cell_text(doc.tables[2].rows[0].cells[-1], txt)
+                self.set_cell_text_keep_style(doc.tables[2].rows[0].cells[-1], txt)
             except Exception:
                 pass
 
-    def clear_row(self, row):
+    # ------------------- PRESERVAÇÃO DE ESTILO/COR -------------------
+    def clear_row_text_only(self, row):
         for c in row.cells:
-            self.set_cell_text(c, "")
+            self.set_cell_text_keep_style(c, "")
 
-    def set_cell_text(self, cell, text):
+    def set_cell_text_keep_style(self, cell, text):
         text = "" if text is None else str(text)
+
         if cell.paragraphs:
             p = cell.paragraphs[0]
             if p.runs:
@@ -294,6 +372,7 @@ class CopyModelAtaGenerator:
                     r.text = ""
             else:
                 p.add_run(text)
+
             for pp in cell.paragraphs[1:]:
                 for r in pp.runs:
                     r.text = ""
@@ -302,8 +381,10 @@ class CopyModelAtaGenerator:
 
         for p in cell.paragraphs:
             for r in p.runs:
-                r.font.name = "Arial"
-                r.font.size = Pt(8)
+                if r.font.size is None:
+                    r.font.size = Pt(8)
+                if r.font.name is None:
+                    r.font.name = "Arial"
 
     def set_description_cell(self, cell, text):
         text = "" if text is None else str(text)
@@ -331,7 +412,7 @@ class CopyModelAtaGenerator:
             r.font.name = "Arial"
             r.font.size = Pt(8)
 
-    def set_paragraph_text_preserving_first_run(self, p, text):
+    def set_paragraph_text_keep_style(self, p, text):
         if p.runs:
             p.runs[0].text = text
             for r in p.runs[1:]:
