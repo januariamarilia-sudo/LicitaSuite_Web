@@ -8,15 +8,6 @@ def normalize_text(text):
     return " ".join(text.upper().split())
 
 def parse_number(value):
-    """
-    LicitaSuite Web 3.1 LTS
-
-    Corrige leitura de quantitativos e valores:
-    - 27.030 -> 27030
-    - 1.910.835 -> 1910835
-    - R$ 1.649,0000 -> 1649.0000
-    - 1,6490 -> 1.6490
-    """
     if value is None:
         return 0.0
 
@@ -70,4 +61,5 @@ def format_qty(value, use_thousands=False):
 def safe_filename(text):
     text = "" if text is None else str(text)
     text = re.sub(r'[\\/:*?"<>|]+', " ", text)
-    return " ".join(text.split()).strip()[:150]
+    text = " ".join(text.split()).strip()
+    return text[:150]
