@@ -1,11 +1,12 @@
 from dataclasses import dataclass, field
+
 from licitasuite.core.zip_loader import ZipLoader
 from licitasuite.core.file_detector import FileDetector
 from licitasuite.parsers.appendix_parser import AppendixParser
-from licitasuite.parsers.pdf_parser import PdfWinnersParser
+from licitasuite.parsers.pdf_winners_parser import PdfWinnersParser
 from licitasuite.engine.cross_checker import CrossChecker
+from licitasuite.generators.docx_engine.copy_model_generator import CopyModelAtaGenerator
 from licitasuite.reports.conference_report import ConferenceReport
-from licitasuite.generators.docx_engine.model_based_generator import ModelBasedAtaGenerator
 
 @dataclass
 class PipelineResult:
@@ -28,62 +29,40 @@ class Pipeline:
         errors = []
         try:
             folder = ZipLoader(zip_path).extract()
-            messages.append(f"ZIP extraído em: {folder}")
+            messages.append(f"ZIP extraído: {folder}")
 
             detected = FileDetector(folder).detect()
-            messages.append(f"Modelo da Ata: {detected.modelo_ata}")
-            messages.append(f"Apêndice: {detected.apendice}")
-            messages.append(f"PDF dos vencedores: {detected.vencedores_pdf}")
+            if detected.missing():
+                return PipelineResult(False, messages, ["Arquivos obrigatórios ausentes: " + ", ".join(detected.missing())])
 
-            faltando = detected.missing()
-            if faltando:
-                errors.append("Arquivos obrigatórios não localizados: " + ", ".join(faltando))
-                return PipelineResult(ok=False, messages=messages, errors=errors)
+            messages.append(f"Modelo usado: {detected.modelo_ata}")
+            messages.append(f"Apêndice usado: {detected.apendice}")
+            messages.append(f"PDF usado: {detected.vencedores_pdf}")
 
-            itens_apendice = AppendixParser().parse(detected.apendice)
-            messages.append(f"Itens do Apêndice: {len(itens_apendice)}")
+            apendice = AppendixParser().parse(detected.apendice)
+            fornecedores = PdfWinnersParser().parse(detected.vencedores_pdf)
+            messages.append(f"Itens no Apêndice: {len(apendice)}")
+            messages.append(f"Fornecedores reais identificados: {len(fornecedores)}")
 
-            pdf_result = PdfWinnersParser().parse(detected.vencedores_pdf)
-            fornecedores = pdf_result.fornecedores
-            messages.append(f"Fornecedores reais identificados no PDF: {len(fornecedores)}")
-
-            cross_result = CrossChecker().build_atas(itens_apendice, fornecedores)
-
-            if cross_result["inconsistencias_gerais"]:
-                errors.extend(cross_result["inconsistencias_gerais"])
-
+            result = CrossChecker().build(apendice, fornecedores)
             report = ConferenceReport()
-            txt_path = report.write(cross_result)
-            json_path = report.write_json(cross_result)
+            report_txt = report.write(result)
+            report_json = report.write_json(result)
 
-            messages.append("")
-            messages.append("CONFERÊNCIA POR FORNECEDOR:")
-            for ata in cross_result["atas"]:
-                itens = ", ".join(str(item.numero_item) for item in ata.itens) or "nenhum"
-                total = ("R$ " + f"{ata.valor_total:,.2f}").replace(",", "X").replace(".", ",").replace("X", ".")
-                messages.append(f"- {ata.fornecedor_nome} | Itens: {len(ata.itens)} ({itens}) | Total: {total}")
+            if result.get("inconsistencias"):
+                return PipelineResult(False, messages, result["inconsistencias"])
 
-            if errors:
-                messages.append("Geração interrompida por inconsistências relevantes.")
-                return PipelineResult(ok=False, messages=messages, errors=errors)
+            gen = CopyModelAtaGenerator(detected.modelo_ata)
+            files, zip_final = gen.generate_all(result["atas"])
 
-            generator = ModelBasedAtaGenerator(detected.modelo_ata)
-            generated_files, final_zip = generator.generate_all(cross_result["atas"])
+            for ata in result["atas"]:
+                messages.append(f"- {ata.fornecedor_nome}: {len(ata.itens)} item(ns)")
 
-            messages.append("")
-            messages.append("Atas DOCX geradas:")
-            for path in generated_files:
-                messages.append(f"- {path}")
-            messages.append(f"ZIP final gerado em: {final_zip}")
-
-            if cross_result["itens_sem_vencedor"]:
-                messages.append("Itens do Apêndice sem vencedor identificado: " + ", ".join(map(str, cross_result["itens_sem_vencedor"])))
-
-            messages.append(f"Relatório de conferência salvo em: {txt_path}")
-            messages.append(f"Dados para atas salvos em: {json_path}")
-            messages.append("LicitaSuite Web 2.0 – Correção PL 53 concluída.")
-
-            return PipelineResult(ok=True, messages=messages)
+            messages.append(f"Atas geradas: {len(files)}")
+            messages.append(f"ZIP final: {zip_final}")
+            messages.append(f"Relatório: {report_txt}")
+            messages.append("LicitaSuite 3.0 concluído.")
+            return PipelineResult(True, messages, [])
 
         except Exception as exc:
-            return PipelineResult(ok=False, messages=messages, errors=[str(exc)])
+            return PipelineResult(False, messages, [str(exc)])

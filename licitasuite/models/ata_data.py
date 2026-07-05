@@ -1,5 +1,18 @@
 from dataclasses import dataclass, field
-from licitasuite.models.ata_item import AtaItem
+
+@dataclass
+class AtaItem:
+    numero_item: int
+    codigo_siplan: str
+    descricao_oficial: str
+    apresentacao: str
+    marca: str = ""
+    fabricante: str = ""
+    modelo: str = ""
+    quantidade: float = 0.0
+    valor_unitario: float = 0.0
+    valor_total: float = 0.0
+    appendix_cells_text: list[str] = field(default_factory=list)
 
 @dataclass
 class AtaData:
@@ -18,8 +31,8 @@ class AtaData:
     rg_representante: str = ""
     orgao_expedidor: str = ""
     itens: list[AtaItem] = field(default_factory=list)
-    inconsistencias: list[str] = field(default_factory=list)
     informacoes_nao_localizadas: list[str] = field(default_factory=list)
+    inconsistencias: list[str] = field(default_factory=list)
 
     @property
     def valor_total(self):

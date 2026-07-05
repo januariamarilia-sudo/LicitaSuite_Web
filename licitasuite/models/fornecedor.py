@@ -6,7 +6,7 @@ class ItemFornecedor:
     marca: str = ""
     fabricante: str = ""
     modelo: str = ""
-    quantidade: float = 0.0
+    quantidade_pdf: float = 0.0
     valor_unitario: float = 0.0
     valor_total: float = 0.0
     linha_origem: str = ""
