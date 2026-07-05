@@ -20,10 +20,7 @@ def valor_extenso(value):
         reais = int(value)
         cents = int(round((float(value) - reais) * 100))
         txt = num2words(reais, lang="pt_BR")
-        if reais == 1:
-            txt += " real"
-        else:
-            txt += " reais"
+        txt += " real" if reais == 1 else " reais"
         if cents:
             txt += " e " + num2words(cents, lang="pt_BR") + (" centavo" if cents == 1 else " centavos")
         return txt
@@ -31,6 +28,18 @@ def valor_extenso(value):
         return ""
 
 class CopyModelAtaGenerator:
+    """
+    LicitaSuite Web 3.1 LTS
+
+    Correções:
+    - Quantitativo sem conversão indevida para decimal.
+    - Colunas mapeadas pelo cabeçalho real do modelo.
+    - Compatível com modelos com ou sem coluna MODELO.
+    - Valor total posicionado na última coluna correta.
+    - Descrição com negrito apenas até " - ".
+    - Preserva linhas clonadas do modelo.
+    """
+
     def __init__(self, modelo_path, output_dir="output/atas_geradas"):
         self.modelo_path = Path(modelo_path)
         self.output_dir = Path(output_dir)
@@ -42,13 +51,17 @@ class CopyModelAtaGenerator:
                 f.unlink()
             except Exception:
                 pass
+
         generated = [self.generate_one(a) for a in atas if a.itens]
+
         zip_path = self.output_dir.parent / "atas_geradas.zip"
         if zip_path.exists():
             zip_path.unlink()
+
         with ZipFile(zip_path, "w", ZIP_DEFLATED) as z:
             for f in generated:
                 z.write(f, f.name)
+
         return generated, zip_path
 
     def generate_one(self, ata):
@@ -98,42 +111,82 @@ class CopyModelAtaGenerator:
         for p in doc.paragraphs:
             n = normalize_text(p.text)
             if "CONSORCIO PUBLICO" in n and "RESOLVEM REGISTRAR" in n:
-                self.set_paragraph_text(p, text)
+                self.set_paragraph_text_preserving_first_run(p, text)
                 return
 
     def replace_price_table(self, doc, ata):
         table = self.find_price_table(doc)
         if table is None:
             return
-        header_idx = 0
+
+        mapping = self.map_header_columns(table.rows[0])
         data_idx = 1 if len(table.rows) > 1 else 0
         data_template = deepcopy(table.rows[data_idx]._tr)
 
-        while len(table.rows) > header_idx + 1:
+        while len(table.rows) > 1:
             table.rows[-1]._tr.getparent().remove(table.rows[-1]._tr)
 
         for item in ata.itens:
             table._tbl.append(deepcopy(data_template))
             row = table.rows[-1]
             self.clear_row(row)
-            values = [
-                item.codigo_siplan,
-                str(item.numero_item),
-                format_qty(item.quantidade),
-                item.descricao_oficial,
-                item.apresentacao,
-                item.marca or item.fabricante or item.modelo,
-                format_money(item.valor_unitario, 4),
-                format_money(item.valor_total, 2),
-            ]
-            for i, v in enumerate(values):
-                if i < len(row.cells):
-                    self.set_cell_text(row.cells[i], v)
+
+            self.put(row, mapping, "siplan", item.codigo_siplan)
+            self.put(row, mapping, "item", str(item.numero_item))
+            self.put(row, mapping, "quant", format_qty(item.quantidade, use_thousands=False))
+            self.put(row, mapping, "descricao", item.descricao_oficial, description=True)
+            self.put(row, mapping, "apresentacao", item.apresentacao)
+
+            marca_text = item.marca or item.fabricante or ""
+            modelo_text = item.modelo or ""
+
+            if "modelo" not in mapping and modelo_text:
+                marca_text = (marca_text + " " + modelo_text).strip()
+
+            self.put(row, mapping, "marca", marca_text)
+            self.put(row, mapping, "modelo", modelo_text)
+            self.put(row, mapping, "preco_unitario", format_money(item.valor_unitario, 4))
+            self.put(row, mapping, "preco_total", format_money(item.valor_total, 2))
 
         table._tbl.append(deepcopy(data_template))
         total_row = table.rows[-1]
         self.clear_row(total_row)
-        self.write_total(total_row, ata.valor_total)
+        self.write_total(total_row, mapping, ata.valor_total)
+
+    def map_header_columns(self, row):
+        mapping = {}
+        for i, cell in enumerate(row.cells):
+            h = normalize_text(cell.text)
+            if "SIPLAN" in h or ("COD" in h and "siplan" not in mapping):
+                mapping["siplan"] = i
+            elif h == "ITEM":
+                mapping["item"] = i
+            elif "QUANT" in h:
+                mapping["quant"] = i
+            elif "DESCRI" in h:
+                mapping["descricao"] = i
+            elif "APRESENT" in h:
+                mapping["apresentacao"] = i
+            elif "MARCA" in h:
+                mapping["marca"] = i
+            elif "MODELO" in h:
+                mapping["modelo"] = i
+            elif "UNIT" in h or ("PRECO" in h and "TOTAL" not in h):
+                mapping["preco_unitario"] = i
+            elif "TOTAL" in h or "PRECO TOTAL" in h:
+                mapping["preco_total"] = i
+        return mapping
+
+    def put(self, row, mapping, key, value, description=False):
+        if key not in mapping:
+            return
+        idx = mapping[key]
+        if idx >= len(row.cells):
+            return
+        if description:
+            self.set_description_cell(row.cells[idx], value)
+        else:
+            self.set_cell_text(row.cells[idx], value)
 
     def find_price_table(self, doc):
         for t in doc.tables:
@@ -144,47 +197,66 @@ class CopyModelAtaGenerator:
                 return t
         return None
 
-    def write_total(self, row, total):
+    def write_total(self, row, mapping, total):
         cells = row.cells
         if not cells:
             return
+
+        last_idx = mapping.get("preco_total", len(cells) - 1)
+        last_idx = min(last_idx, len(cells) - 1)
+
         try:
             label = cells[0]
-            for i in range(1, len(cells) - 1):
+            for i in range(1, last_idx):
                 label = label.merge(cells[i])
             self.set_cell_text(label, "VALOR TOTAL:")
-            self.set_cell_text(cells[-1], format_money(total, 2))
-            self.center(label); self.center(cells[-1])
-            self.bold(label); self.bold(cells[-1])
+            self.set_cell_text(cells[last_idx], format_money(total, 2))
+            self.center(label)
+            self.center(cells[last_idx])
+            self.bold(label)
+            self.bold(cells[last_idx])
             self.horizontal(label)
             row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
             row.height = Cm(0.55)
         except Exception:
-            self.set_cell_text(cells[0], "VALOR TOTAL: " + format_money(total, 2))
+            self.set_cell_text(cells[0], "VALOR TOTAL:")
+            self.set_cell_text(cells[-1], format_money(total, 2))
 
     def replace_total_paragraph(self, doc, ata):
         txt = f"4.2 Valor total dos preços registrados: {format_money(ata.valor_total, 2)} ({valor_extenso(ata.valor_total)})."
         for p in doc.paragraphs:
             if "Valor total dos preços registrados" in p.text:
-                self.set_paragraph_text(p, txt)
+                self.set_paragraph_text_preserving_first_run(p, txt)
                 return
 
     def replace_appendix(self, doc, ata):
         table = self.find_appendix_table(doc)
         if table is None:
             return
+
         data_idx = 1 if len(table.rows) > 1 else 0
         data_template = deepcopy(table.rows[data_idx]._tr)
+
         while len(table.rows) > 1:
             table.rows[-1]._tr.getparent().remove(table.rows[-1]._tr)
+
         for item in ata.itens:
             table._tbl.append(deepcopy(data_template))
             row = table.rows[-1]
             self.clear_row(row)
-            values = item.appendix_cells_text or [item.codigo_siplan, str(item.numero_item), item.descricao_oficial, item.apresentacao, format_qty(item.quantidade)]
+            values = item.appendix_cells_text or [
+                item.codigo_siplan,
+                str(item.numero_item),
+                item.descricao_oficial,
+                item.apresentacao,
+                format_qty(item.quantidade),
+            ]
             for i, v in enumerate(values):
                 if i < len(row.cells):
-                    self.set_cell_text(row.cells[i], v)
+                    if i == 2:
+                        self.set_description_cell(row.cells[i], v)
+                    else:
+                        self.set_cell_text(row.cells[i], v)
 
     def find_appendix_table(self, doc):
         best = None
@@ -227,12 +299,39 @@ class CopyModelAtaGenerator:
                     r.text = ""
         else:
             cell.text = text
+
         for p in cell.paragraphs:
             for r in p.runs:
                 r.font.name = "Arial"
                 r.font.size = Pt(8)
 
-    def set_paragraph_text(self, p, text):
+    def set_description_cell(self, cell, text):
+        text = "" if text is None else str(text)
+        p = cell.paragraphs[0] if cell.paragraphs else cell.add_paragraph()
+
+        for r in list(p.runs):
+            r.text = ""
+        for extra_p in cell.paragraphs[1:]:
+            for r in extra_p.runs:
+                r.text = ""
+
+        if " - " in text:
+            first, rest = text.split(" - ", 1)
+            r1 = p.add_run(first)
+            r1.bold = True
+            r2 = p.add_run(" - " + rest)
+            r2.bold = False
+            runs = [r1, r2]
+        else:
+            r = p.add_run(text)
+            r.bold = True
+            runs = [r]
+
+        for r in runs:
+            r.font.name = "Arial"
+            r.font.size = Pt(8)
+
+    def set_paragraph_text_preserving_first_run(self, p, text):
         if p.runs:
             p.runs[0].text = text
             for r in p.runs[1:]:

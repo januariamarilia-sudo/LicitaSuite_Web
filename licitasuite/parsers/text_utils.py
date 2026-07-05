@@ -8,15 +8,46 @@ def normalize_text(text):
     return " ".join(text.upper().split())
 
 def parse_number(value):
+    """
+    LicitaSuite Web 3.1 LTS
+
+    Corrige leitura de quantitativos e valores:
+    - 27.030 -> 27030
+    - 1.910.835 -> 1910835
+    - R$ 1.649,0000 -> 1649.0000
+    - 1,6490 -> 1.6490
+    """
     if value is None:
         return 0.0
-    text = str(value).strip().replace("R$", "").replace(" ", "")
+
+    text = str(value).strip()
+    text = text.replace("R$", "").replace(" ", "")
     if not text:
         return 0.0
+
+    text = re.sub(r"[^0-9,.-]", "", text)
+    if not text:
+        return 0.0
+
     if "," in text:
         text = text.replace(".", "").replace(",", ".")
-    else:
-        text = re.sub(r"[^0-9.]", "", text)
+        try:
+            return float(text)
+        except Exception:
+            return 0.0
+
+    if "." in text:
+        parts = text.split(".")
+        if len(parts) > 1 and all(len(p) == 3 for p in parts[1:]) and len(parts[0]) <= 3:
+            try:
+                return float("".join(parts))
+            except Exception:
+                return 0.0
+        try:
+            return float(text)
+        except Exception:
+            return 0.0
+
     try:
         return float(text)
     except Exception:
@@ -27,8 +58,11 @@ def format_money(value, casas=2):
     s = f"R$ {value:,.{casas}f}"
     return s.replace(",", "X").replace(".", ",").replace("X", ".")
 
-def format_qty(value):
+def format_qty(value, use_thousands=False):
     value = float(value or 0)
+    if use_thousands:
+        s = f"{int(round(value)):,.0f}"
+        return s.replace(",", ".")
     if value.is_integer():
         return str(int(value))
     return str(value).replace(".", ",")
