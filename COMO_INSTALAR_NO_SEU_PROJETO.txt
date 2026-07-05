@@ -1,0 +1,46 @@
+LICITASUITE 6.1 PROFESSIONAL FINAL
+
+Este pacote deve ser COLADO dentro da pasta principal do seu LicitaSuite.
+
+Sua pasta principal deve conter:
+- main.py
+- requirements.txt
+- licitasuite
+- config
+- docs
+
+COMO APLICAR
+
+1. Extraia este ZIP.
+2. Copie as pastas:
+   - build_tools
+   - installer
+   - assets
+
+3. Cole dentro de:
+   C:\Users\janua\OneDrive\Documentos\LicitaSuite
+
+4. Quando perguntar, clique em:
+   Substituir os arquivos no destino.
+
+COMO GERAR O EXECUTAVEL
+
+1. Entre em:
+   build_tools
+
+2. Dê dois cliques em:
+   build_professional.bat
+
+3. Aguarde finalizar.
+
+4. O executável será criado em:
+   dist\LicitaSuite\LicitaSuite.exe
+
+COMO GERAR O INSTALADOR
+
+1. Instale o Inno Setup.
+2. Abra:
+   installer\LicitaSuite_Professional_Setup.iss
+3. Clique em Compile.
+4. O instalador será criado em:
+   installer\output

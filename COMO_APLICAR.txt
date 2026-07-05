@@ -1,0 +1,29 @@
+COMO APLICAR ESTA ENTREGA
+
+1. Extraia este ZIP.
+
+2. Copie estes arquivos/pastas:
+
+- .streamlit
+- requirements.txt
+- .gitignore
+- README_STREAMLIT_DEPLOY.md
+- docs/CHECKLIST_STREAMLIT_CLOUD.md
+
+3. Cole na raiz da pasta:
+
+LicitaSuite_Web_1_0
+
+A raiz é onde ficam:
+- licitasuite
+- web
+- config
+- docs
+- main.py
+- requirements.txt
+
+4. Depois, suba a pasta para o GitHub.
+
+5. No Streamlit Cloud, use como arquivo principal:
+
+web/app.py

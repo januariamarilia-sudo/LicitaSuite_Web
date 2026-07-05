@@ -1,0 +1,33 @@
+LICITASUITE 6.0 PROFESSIONAL
+
+PASSO 1 - GERAR O APLICATIVO
+
+1. Abra a pasta principal do LicitaSuite.
+2. Entre em:
+   build_tools
+3. Dê dois cliques em:
+   build_professional.bat
+4. Aguarde finalizar.
+5. O aplicativo será criado em:
+   dist\LicitaSuite\LicitaSuite.exe
+
+PASSO 2 - TESTAR
+
+Abra:
+dist\LicitaSuite\LicitaSuite.exe
+
+Se abrir a janela do LicitaSuite, está correto.
+
+PASSO 3 - GERAR O INSTALADOR
+
+1. Instale o Inno Setup no Windows.
+2. Abra:
+   installer\LicitaSuite_Professional_Setup.iss
+3. Clique em Compile.
+4. O instalador ficará em:
+   installer\output\LicitaSuite_6_0_Professional_Setup.exe
+
+OBSERVAÇÃO
+
+Depois de instalado, o LicitaSuite abrirá como programa normal do Windows,
+sem VS Code e sem terminal.

@@ -1,0 +1,10 @@
+streamlit
+pandas
+openpyxl
+python-docx
+pypdf
+pdfplumber
+pdfminer.six
+pillow
+lxml
+num2words

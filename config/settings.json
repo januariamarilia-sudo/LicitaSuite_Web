@@ -1,0 +1,7 @@
+{
+  "app_name": "LicitaSuite",
+  "version": "4.0 Produção",
+  "temp_dir": "temp",
+  "output_dir": "output",
+  "missing_value_token": "[INFORMAÇÃO NÃO LOCALIZADA]"
+}

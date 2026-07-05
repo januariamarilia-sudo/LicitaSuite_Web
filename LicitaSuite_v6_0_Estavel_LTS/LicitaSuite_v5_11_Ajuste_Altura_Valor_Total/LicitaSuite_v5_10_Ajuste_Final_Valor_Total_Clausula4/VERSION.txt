@@ -1,0 +1,1 @@
+LicitaSuite v6.0 Estável (LTS)

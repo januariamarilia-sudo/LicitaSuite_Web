@@ -1,0 +1,2 @@
+LicitaSuite 6.0 Professional
+Base: LicitaSuite v6.0 Estável LTS
