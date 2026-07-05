@@ -15,13 +15,16 @@ class ItemFornecedor:
 class Fornecedor:
     razao_social: str
     cnpj: str = ""
+    tipo: str = ""
     endereco: str = ""
     municipio: str = ""
     uf: str = ""
     cep: str = ""
     telefone: str = ""
     email: str = ""
+    inscricao_estadual: str = ""
     representante: str = ""
     cpf_representante: str = ""
     rg_representante: str = ""
+    orgao_expedidor: str = ""
     itens: list[ItemFornecedor] = field(default_factory=list)

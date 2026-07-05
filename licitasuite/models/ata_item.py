@@ -1,5 +1,4 @@
-from dataclasses import dataclass
-from typing import Any
+from dataclasses import dataclass, field
 
 @dataclass
 class AtaItem:
@@ -13,5 +12,4 @@ class AtaItem:
     quantidade: float
     valor_unitario: float
     valor_total: float
-    appendix_cells_text: list[str] | None = None
-    appendix_row_xml: Any = None
+    appendix_cells_text: list[str] = field(default_factory=list)
