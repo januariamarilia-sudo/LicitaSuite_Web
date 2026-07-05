@@ -1,11 +1,17 @@
+import sys
 import importlib
 import shutil
 import zipfile
 from pathlib import Path
 from datetime import datetime
+
+ROOT_DIR = Path(__file__).resolve().parent.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
 import streamlit as st
 
-BASE_DIR = Path.cwd()
+BASE_DIR = ROOT_DIR
 UPLOAD_DIR = BASE_DIR / "web_uploads"
 OUTPUT_DIR = BASE_DIR / "output"
 ATAS_DIR = OUTPUT_DIR / "atas_geradas"
@@ -49,7 +55,10 @@ def find_engine():
             return module_name, attr_name, attr
         except Exception as exc:
             errors.append(f"{module_name}.{attr_name}: {exc}")
-    raise RuntimeError("Não foi possível localizar o motor do LicitaSuite.\n\n" + "\n".join(errors))
+    raise RuntimeError(
+        "Nao foi possivel localizar o motor do LicitaSuite.\n\n"
+        "Tentativas realizadas:\n" + "\n".join(errors)
+    )
 
 
 def run_engine(zip_path: Path):
@@ -59,7 +68,9 @@ def run_engine(zip_path: Path):
         for method_name in ["run", "execute", "process", "gerar"]:
             if hasattr(pipeline, method_name):
                 return getattr(pipeline, method_name)(str(zip_path))
-        raise RuntimeError(f"Pipeline encontrado em {module_name}, mas não possui método run/execute/process/gerar.")
+        raise RuntimeError(
+            f"Pipeline encontrado em {module_name}, mas nao possui metodo run/execute/process/gerar."
+        )
     return engine(str(zip_path))
 
 
@@ -77,17 +88,17 @@ def make_result_zip():
 def main():
     ensure_dirs()
     st.markdown(
-        '''
+        """
         <style>
         .title {text-align:center;color:#1f5494;font-size:40px;font-weight:800;margin-bottom:0;}
         .subtitle {text-align:center;color:#334155;font-size:19px;margin-top:0;margin-bottom:30px;}
         .footer {text-align:center;color:#64748b;font-size:13px;margin-top:35px;}
         </style>
-        ''',
+        """,
         unsafe_allow_html=True,
     )
     st.markdown("<div class='title'>LicitaSuite Web 1.0</div>", unsafe_allow_html=True)
-    st.markdown("<div class='subtitle'>Gerador de Atas de Registro de Preços</div>", unsafe_allow_html=True)
+    st.markdown("<div class='subtitle'>Gerador de Atas de Registro de Precos</div>", unsafe_allow_html=True)
 
     col1, col2 = st.columns([2, 1])
     with col1:
@@ -95,12 +106,12 @@ def main():
         uploaded = st.file_uploader(
             "Selecione o ZIP do processo",
             type=["zip"],
-            help="O ZIP deve conter modelo da Ata, Apêndice e PDF dos vencedores.",
+            help="O ZIP deve conter modelo da Ata, Apendice e PDF dos vencedores.",
         )
     with col2:
         st.markdown("### ℹ️ Status")
-        st.info("Versão Web 1.0 Free")
-        st.caption("Usa o motor da versão desktop.")
+        st.info("Versao Web 1.0 Free")
+        st.caption("Usa o motor da versao desktop.")
 
     st.divider()
 
@@ -133,12 +144,13 @@ def main():
                     return
 
                 final_zip = make_result_zip()
-                progress.progress(100, text="Concluído")
-                st.success(f"✔ Processo concluído. {len(generated)} ata(s) gerada(s).")
+                progress.progress(100, text="Concluido")
+                st.success(f"✔ Processo concluido. {len(generated)} ata(s) gerada(s).")
 
                 st.markdown("### 📄 Atas geradas")
                 for doc in generated:
                     st.write(f"• {doc.name}")
+
                 with open(final_zip, "rb") as f:
                     st.download_button(
                         "⬇️ BAIXAR ZIP COM AS ATAS",
@@ -149,10 +161,13 @@ def main():
                     )
             except Exception as exc:
                 progress.progress(0, text="Erro")
-                st.error("Ocorreu um erro durante a geração.")
+                st.error("Ocorreu um erro durante a geracao.")
                 st.exception(exc)
 
-    st.markdown("<div class='footer'>LicitaSuite Web 1.0 Free • Engine LTS • © 2026</div>", unsafe_allow_html=True)
+    st.markdown(
+        "<div class='footer'>LicitaSuite Web 1.0 Free • Engine LTS • © 2026</div>",
+        unsafe_allow_html=True,
+    )
 
 
 if __name__ == "__main__":
