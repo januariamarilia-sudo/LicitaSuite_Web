@@ -172,9 +172,8 @@ class CopyModelAtaGenerator:
             row = table.rows[-1]
             self.clear_row_text_only(row)
 
-            self.put(row, mapping, "lote", getattr(item, "lote_display", None) or getattr(item, "lote", "") or item.codigo_siplan)
             self.put(row, mapping, "siplan", item.codigo_siplan)
-            self.put(row, mapping, "item", getattr(item, "item_display", None) or str(item.numero_item))
+            self.put(row, mapping, "item", str(item.numero_item))
             self.put(row, mapping, "quant", format_qty(item.quantidade, use_thousands=False))
             self.put(row, mapping, "descricao", item.descricao_oficial, description=True)
             self.put(row, mapping, "apresentacao", item.apresentacao)
@@ -231,9 +230,7 @@ class CopyModelAtaGenerator:
         mapping = {}
         for i, cell in enumerate(row.cells):
             h = normalize_text(cell.text)
-            if "LOTE" in h:
-                mapping["lote"] = i
-            elif "SIPLAN" in h or ("COD" in h and "siplan" not in mapping):
+            if "SIPLAN" in h or ("COD" in h and "siplan" not in mapping):
                 mapping["siplan"] = i
             elif h == "ITEM":
                 mapping["item"] = i
@@ -269,7 +266,7 @@ class CopyModelAtaGenerator:
             if not t.rows:
                 continue
             h = normalize_text(" ".join(c.text for c in t.rows[0].cells))
-            if (("SIPLAN" in h or "LOTE" in h) and "DESCRI" in h and ("PRECO" in h or "VALOR" in h)):
+            if "SIPLAN" in h and "DESCRI" in h and ("PRECO" in h or "VALOR" in h):
                 return t
         return None
 
@@ -344,7 +341,7 @@ class CopyModelAtaGenerator:
             if not t.rows:
                 continue
             h = normalize_text(" ".join(c.text for c in t.rows[0].cells))
-            score = sum(1 for w in ["SIPLAN", "LOTE", "ITEM", "DESCRITIVO", "APRESENT", "ICISMEP", "TOTAL"] if w in h)
+            score = sum(1 for w in ["SIPLAN", "ITEM", "DESCRITIVO", "APRESENT", "ICISMEP", "TOTAL"] if w in h)
             if len(t.rows[0].cells) > 10:
                 score += 2
             if score > score_best:

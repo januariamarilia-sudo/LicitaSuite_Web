@@ -10,8 +10,6 @@ class ItemFornecedor:
     valor_unitario: float = 0.0
     valor_total: float = 0.0
     linha_origem: str = ""
-    lote: int | None = None
-    item_display: str | None = None
 
 @dataclass
 class Fornecedor:

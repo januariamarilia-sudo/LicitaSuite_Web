@@ -8,6 +8,3 @@ class ItemApendice:
     apresentacao: str
     total: float = 0.0
     cells_text: list[str] = field(default_factory=list)
-    lote: int | None = None
-    item_display: str | None = None
-    lote_display: str | None = None
