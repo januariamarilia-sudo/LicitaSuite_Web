@@ -12,6 +12,23 @@ from docx.oxml.ns import qn
 
 from licitasuite.parsers.text_utils import normalize_text, safe_filename, format_money, format_qty
 
+def nome_arquivo_ata(processo, pregao, fornecedor_nome):
+    import re
+
+    pl = str(processo).replace("/", ".").strip()
+    pe = str(pregao).replace("/", ".").strip()
+
+    palavras = str(fornecedor_nome).strip().split()
+
+    if len(palavras) >= 2:
+        nome = " ".join(palavras[:2]).upper()
+    else:
+        nome = palavras[0].upper()
+
+    nome = re.sub(r'[\\/:*?"<>|]+', " ", nome)
+
+    return f"ATA DE REGISTRO DE PREÇOS PL {pl} PE {pe} - {nome}.docx"
+
 NA = "[INFORMAÇÃO NÃO LOCALIZADA]"
 
 def valor_extenso(value):
@@ -75,7 +92,7 @@ class CopyModelAtaGenerator:
         self.replace_signature(doc, ata)
 
         fornecedor = self.clean_supplier_name(ata.fornecedor_nome)
-        out = self.output_dir / f"ATA DE REGISTRO DE PREÇOS - {safe_filename(fornecedor)}.docx"
+        out = self.output_dir / nome_arquivo_ata(processo, pregao, ata.fornecedor_nome)
         doc.save(out)
         return out
 
