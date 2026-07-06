@@ -12,6 +12,8 @@ class ConferenceReport:
             lines.append(f"Fornecedor: {ata.fornecedor_nome}")
             lines.append(f"CNPJ: {ata.fornecedor_cnpj}")
             lines.append(f"Endereço: {getattr(ata, 'endereco', '')}")
+            lines.append(f"Município: {getattr(ata, 'municipio', '')}")
+            lines.append(f"UF: {getattr(ata, 'uf', '')}")
             lines.append(f"CEP: {getattr(ata, 'cep', '')}")
             lines.append(f"Telefone: {getattr(ata, 'telefone', '')}")
             lines.append(f"E-mail: {getattr(ata, 'email', '')}")

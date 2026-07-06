@@ -25,10 +25,57 @@ def clean_cell(value):
     text = str(value).strip()
     if text.endswith(".0") and text.replace(".0", "").isdigit():
         text = text.replace(".0", "")
-    return text.strip()
+    return " ".join(text.split()).strip()
+
+
+def split_address_city_uf(endereco):
+    """
+    Lê endereço de mala direta, por exemplo:
+    Rodovia JK 459, KM 99 S/N Galpão, Bairro Santa Edwirges, no Município de Pouso Alegre - MG
+
+    Retorna:
+    endereco_limpo, municipio, uf
+    """
+    text = clean_cell(endereco)
+    if not text:
+        return "", "", ""
+
+    patterns = [
+        r"^(?P<addr>.*?),?\s+no\s+Munic[ií]pio\s+de\s+(?P<city>.+?)\s*[-/]\s*(?P<uf>[A-Z]{2})\.?$",
+        r"^(?P<addr>.*?),?\s+Munic[ií]pio\s+de\s+(?P<city>.+?)\s*[-/]\s*(?P<uf>[A-Z]{2})\.?$",
+        r"^(?P<addr>.*?),?\s+em\s+(?P<city>.+?)\s*[-/]\s*(?P<uf>[A-Z]{2})\.?$",
+    ]
+
+    for pattern in patterns:
+        m = re.search(pattern, text, flags=re.IGNORECASE)
+        if m:
+            addr = clean_cell(m.group("addr")).rstrip(",")
+            city = clean_cell(m.group("city"))
+            uf = clean_cell(m.group("uf")).upper()
+            return addr, city, uf
+
+    # fallback: tenta final "Cidade - UF"
+    m = re.search(r"(?P<city>[A-Za-zÀ-ÿ\s]+)\s*[-/]\s*(?P<uf>[A-Z]{2})\.?$", text)
+    if m:
+        city = clean_cell(m.group("city"))
+        uf = clean_cell(m.group("uf")).upper()
+        return text, city, uf
+
+    return text, "", ""
 
 
 class SupplierDatabase:
+    """
+    Banco geral de fornecedores.
+
+    Busca preferencial:
+    1. CNPJ;
+    2. razão social normalizada.
+
+    Compatível com banco de mala direta:
+    FORNECEDOR | ENDEREÇO | CEP | FONE | EMAIL | CNPJ | INSCRIÇÃO ESTAUDAL | REPRESENTANTE | CPF | RG | ORGAO
+    """
+
     def __init__(self, path=None):
         self.path = Path(path) if path else None
         self.records = []
@@ -55,9 +102,14 @@ class SupplierDatabase:
         col = self._map_headers(headers)
 
         for row in ws.iter_rows(min_row=2, values_only=True):
+            raw_endereco = self._get(row, col, "endereco")
+            endereco_limpo, municipio, uf = split_address_city_uf(raw_endereco)
+
             rec = {
                 "fornecedor": self._get(row, col, "fornecedor"),
-                "endereco": self._get(row, col, "endereco"),
+                "endereco": endereco_limpo or raw_endereco,
+                "municipio": municipio,
+                "uf": uf,
                 "cep": self._get(row, col, "cep"),
                 "telefone": self._get(row, col, "telefone"),
                 "email": self._get(row, col, "email"),
@@ -99,13 +151,13 @@ class SupplierDatabase:
                 mapping["email"] = idx
             elif "CNPJ" in h:
                 mapping["cnpj"] = idx
-            elif "INSCRI" in h:
+            elif "INSCRI" in h or "ESTAUDAL" in h or "ESTADUAL" in h:
                 mapping["inscricao_estadual"] = idx
             elif "REPRESENT" in h:
                 mapping["representante"] = idx
-            elif h == "CPF":
+            elif h == "CPF" or "CPF" in h:
                 mapping["cpf"] = idx
-            elif h == "RG":
+            elif h == "RG" or "IDENTIDADE" in h:
                 mapping["rg"] = idx
             elif "ORGAO" in h or "ÓRGAO" in h or "EXPED" in h:
                 mapping["orgao"] = idx
@@ -167,6 +219,8 @@ class SupplierDatabase:
 
         fields = {
             "endereco": "endereco",
+            "municipio": "municipio",
+            "uf": "uf",
             "cep": "cep",
             "telefone": "telefone",
             "email": "email",
