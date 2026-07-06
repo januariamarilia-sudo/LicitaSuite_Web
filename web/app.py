@@ -4,7 +4,7 @@ import traceback
 from zipfile import ZipFile, ZIP_DEFLATED
 import streamlit as st
 
-from web.status_inteligente import (
+from status_inteligente import (
     build_status_data,
     create_control_workbook,
     add_extra_files_to_zip,
