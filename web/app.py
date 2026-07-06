@@ -4,9 +4,15 @@ import traceback
 from zipfile import ZipFile, ZIP_DEFLATED
 import streamlit as st
 
-APP_TITLE = "LicitaSuite Web 1.0"
+from web.status_inteligente import (
+    build_status_data,
+    create_control_workbook,
+    add_extra_files_to_zip,
+)
+
+APP_TITLE = "LicitaSuite Web 2.0"
 APP_MAIN_TITLE = "Gerador de Atas de Registro de Preços"
-APP_FOOTER = "LicitaSuite Web 1.0 • Desenvolvido por Januária Medeiros"
+APP_FOOTER = "LicitaSuite Web 2.0 • Desenvolvido por Januária Medeiros"
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 UPLOAD_DIR = BASE_DIR / "web_uploads"
@@ -85,7 +91,6 @@ header[data-testid="stHeader"]{height:0;background:transparent;}
 .ls-card h2{margin:0;color:var(--text);font-size:23px;font-weight:850;text-transform:uppercase;letter-spacing:-.2px;}
 .ls-card p{margin:10px 0 0;color:var(--muted);font-size:15px;line-height:1.55;}
 .ls-upload-area{border:1.5px dashed #B9C9F4;border-radius:20px;padding:38px 22px;margin-top:22px;text-align:center;background:linear-gradient(180deg,#fff,#F8FBFF);}
-.ls-cloud svg{width:68px;height:68px;color:var(--purple);margin-bottom:10px;}
 .ls-upload-title{font-size:18px;color:var(--text);font-weight:850;margin-bottom:5px;}
 .ls-upload-sub,.ls-upload-meta{color:var(--muted);font-size:15px;}
 .ls-upload-meta{font-size:14px;margin-top:16px;}
@@ -100,15 +105,6 @@ header[data-testid="stHeader"]{height:0;background:transparent;}
 .ls-mini-title{font-weight:900;color:var(--blue);font-size:15px;margin-bottom:14px;}
 .ls-mini-card.danger .ls-mini-title{color:#D0002B;}
 .ls-example-line{display:flex;justify-content:space-between;gap:12px;font-size:14px;margin:9px 0;color:var(--text);}
-.ls-benefits{border-top:1px solid var(--border);margin-top:18px;padding-top:16px;}
-.ls-benefit{display:grid;grid-template-columns:34px minmax(0,1fr);gap:12px;padding:10px 0;border-bottom:1px solid #EEF2FA;}
-.ls-benefit:last-child{border-bottom:none;}
-.ls-benefit svg{color:var(--blue);width:24px;height:24px;}
-.ls-benefit strong{color:var(--text);font-size:15px;}
-.ls-benefit div:last-child{color:var(--muted);font-size:14px;line-height:1.42;}
-.ls-bottom-call{margin-top:28px;background:rgba(255,255,255,.95);border:1px solid var(--border);border-radius:20px;box-shadow:0 16px 36px rgba(6,26,88,.08);padding:24px 28px;}
-.ls-bottom-call strong{color:var(--text);font-size:19px;}
-.ls-bottom-call span{color:var(--muted);display:block;margin-top:6px;font-size:15px;}
 .ls-footer{margin-top:30px;padding:18px 30px;text-align:center;color:rgba(255,255,255,.9);background:linear-gradient(90deg,#073F9E 0%,#4F39D7 72%,#7A44E8 100%);border-radius:14px 14px 0 0;border-top:3px solid var(--red);font-size:14px;}
 div[data-testid="stFileUploader"] section{border:0!important;background:transparent!important;padding:0!important;}
 div[data-testid="stFileUploader"] button{background:linear-gradient(135deg,var(--blue2),var(--purple))!important;color:white!important;border:none!important;border-radius:12px!important;font-weight:800!important;padding:.7rem 1.4rem!important;box-shadow:0 12px 24px rgba(103,66,230,.22)!important;}
@@ -117,22 +113,6 @@ div[data-testid="stFileUploader"] button{background:linear-gradient(135deg,var(-
 @media(max-width:900px){.block-container{padding-left:1rem;padding-right:1rem}.ls-header{flex-direction:column;align-items:flex-start;gap:12px}.ls-logo img{width:260px;min-width:220px}.ls-header-right{font-size:15px}.ls-hero{padding-top:28px}.ls-title{white-space:normal;font-size:30px}.ls-system{letter-spacing:.24em;font-size:11px}.ls-grid,.ls-preview-grid{grid-template-columns:1fr}}
 </style>
 """, unsafe_allow_html=True)
-
-def svg_folder():
-    return '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M3 6.5h6l2 2h10v9.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M3 6.5v12"/></svg>'
-
-def svg_chart():
-    return '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 19V5"/><path d="M4 19h16"/><path d="M8 15v-4"/><path d="M12 15V8"/><path d="M16 15v-6"/></svg>'
-
-def svg_cloud():
-    return '<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><path d="M22 45H17a12 12 0 1 1 2-23 16 16 0 0 1 31 6 9 9 0 0 1-1 17h-7"/><path d="M32 47V28"/><path d="M23 36l9-9 9 9"/></svg>'
-
-def svg_small(name):
-    if name == "shield":
-        return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 3 20 6v6c0 5-3.3 8-8 9-4.7-1-8-4-8-9V6z"/><path d="m8.8 12.2 2.2 2.2 4.8-5"/></svg>'
-    if name == "bolt":
-        return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M13 2 4 14h7l-1 8 10-13h-7z"/></svg>'
-    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v5h4"/><path d="M9 13h6"/><path d="M9 17h6"/></svg>'
 
 def render_header():
     st.markdown('<header class="ls-header">', unsafe_allow_html=True)
@@ -144,6 +124,50 @@ def render_header():
         st.markdown('<div class="ls-logo" style="font-size:28px;font-weight:900;color:#073F9E;">ICISMEP CL</div>', unsafe_allow_html=True)
     st.markdown(f'<div class="ls-header-right"><span>{APP_TITLE}</span><span class="ls-pill">Uso Interno</span></div></header>', unsafe_allow_html=True)
 
+def render_preview(status_data):
+    fornecedores = status_data.get("fornecedores", [])
+    itens_nao = status_data.get("itens_sem_vencedor", [])
+
+    if not fornecedores and not itens_nao:
+        return """
+        <div class="ls-preview">
+            <div class="ls-preview-title">Prévia da geração</div>
+            <p>Após o envio, você verá as atas identificadas e os itens correspondentes.</p>
+            <div class="ls-preview-grid">
+                <div class="ls-mini-card"><div class="ls-mini-title">✓ Atas identificadas</div><div style="color:#566482;">Aguardando processamento.</div></div>
+                <div class="ls-mini-card danger"><div class="ls-mini-title">✕ Itens não localizados</div><div style="color:#566482;">Aguardando processamento.</div></div>
+            </div>
+        </div>
+        """
+
+    linhas = []
+    for idx, f in enumerate(fornecedores, start=1):
+        nome = f.get("nome") or f.get("fornecedor") or f.get("contratado") or f"Fornecedor {idx}"
+        itens = f.get("itens", [])
+        itens_txt = ", ".join(str(i) for i in itens) if isinstance(itens, list) else str(itens)
+        linhas.append(f'<div class="ls-example-line"><strong>ATA {idx:03d}</strong><span>{nome} — Itens: {itens_txt or "-"}</span></div>')
+
+    itens_txt = ", ".join(str(i) for i in itens_nao) if itens_nao else "Nenhum item sem localização."
+
+    return f"""
+    <div class="ls-preview">
+        <div class="ls-preview-title">Prévia da geração</div>
+        <p>Dados identificados pelo motor do LicitaSuite.</p>
+        <div class="ls-preview-grid">
+            <div class="ls-mini-card">
+                <div class="ls-mini-title">✓ Atas identificadas</div>
+                {''.join(linhas)}
+                <div style="margin-top:14px;color:#073F9E;font-weight:850;font-size:14px;">Total: {len(fornecedores)} atas</div>
+            </div>
+            <div class="ls-mini-card danger">
+                <div class="ls-mini-title">✕ Itens não localizados</div>
+                <div style="font-weight:850;color:#0B153D;font-size:15px;">{itens_txt}</div>
+                <div style="margin-top:54px;color:#EC174C;font-weight:850;font-size:14px;">Total: {len(itens_nao)} itens</div>
+            </div>
+        </div>
+    </div>
+    """
+
 def main():
     st.set_page_config(page_title="LicitaSuite Web", page_icon="📁", layout="wide")
     inject_css()
@@ -151,52 +175,32 @@ def main():
 
     st.markdown(f'<section class="ls-hero"><div class="ls-system">{APP_TITLE}</div><h1 class="ls-title">{APP_MAIN_TITLE}</h1><div class="ls-line"></div></section>', unsafe_allow_html=True)
 
+    if "status_data" not in st.session_state:
+        st.session_state.status_data = None
+
     col_upload, col_status = st.columns([0.9, 1.12], gap="large")
 
     with col_upload:
-        st.markdown(f'<div class="ls-card"><div class="ls-card-title-row"><div class="ls-icon-round">{svg_folder()}</div><div><h2>1. Enviar processo</h2><p>Selecione o arquivo ZIP do processo.<br>O sistema irá identificar os fornecedores e itens automaticamente.</p></div></div><div class="ls-upload-area"><div class="ls-cloud">{svg_cloud()}</div><div class="ls-upload-title">Arraste e solte o arquivo aqui</div><div class="ls-upload-sub">ou clique para selecionar</div>', unsafe_allow_html=True)
+        st.markdown('<div class="ls-card"><div class="ls-card-title-row"><div class="ls-icon-round">↥</div><div><h2>1. Enviar processo</h2><p>Selecione o arquivo ZIP do processo.</p></div></div><div class="ls-upload-area"><div class="ls-upload-title">Arraste e solte o arquivo aqui</div><div class="ls-upload-sub">ou clique para selecionar</div>', unsafe_allow_html=True)
         uploaded_file = st.file_uploader("Selecione o ZIP do processo", type=["zip"], label_visibility="collapsed")
         st.markdown('<div class="ls-upload-meta">Formato: ZIP • Tamanho máximo: 200MB</div></div><div class="ls-security">▣ Seus dados são processados localmente e não são armazenados.</div></div>', unsafe_allow_html=True)
 
     with col_status:
+        preview_html = render_preview(st.session_state.status_data or {})
         st.markdown(f"""
         <div class="ls-card">
             <div class="ls-status-head">
                 <div class="ls-card-title-row" style="margin-bottom:0;">
-                    <div class="ls-icon-round">{svg_chart()}</div>
+                    <div class="ls-icon-round">▤</div>
                     <div><h2>2. Status e prévia</h2><p>Acompanhe o progresso da geração em tempo real.</p></div>
                 </div>
-                <div class="ls-status-pill">● Aguardando envio</div>
+                <div class="ls-status-pill">● Status inteligente</div>
             </div>
-            <div class="ls-preview">
-                <div class="ls-preview-title">Prévia da geração</div>
-                <p>Após o envio, você verá as atas identificadas e os itens correspondentes.</p>
-                <div class="ls-preview-grid">
-                    <div class="ls-mini-card">
-                        <div class="ls-mini-title">✓ Atas identificadas</div>
-                        <div class="ls-example-line"><strong>ATA 107</strong><span>Itens: 1, 2, 4, 5, 10</span></div>
-                        <div class="ls-example-line"><strong>ATA 108</strong><span>Itens: 6, 7, 8, 11</span></div>
-                        <div class="ls-example-line"><strong>ATA 109</strong><span>Itens: 12, 13, 14, 15</span></div>
-                        <div style="margin-top:14px;color:#073F9E;font-weight:850;font-size:14px;">Total: 3 atas</div>
-                    </div>
-                    <div class="ls-mini-card danger">
-                        <div class="ls-mini-title">✕ Itens não localizados</div>
-                        <div style="font-weight:850;color:#0B153D;font-size:15px;">2, 9, 10, 18</div>
-                        <div style="margin-top:54px;color:#EC174C;font-weight:850;font-size:14px;">Total: 4 itens</div>
-                    </div>
-                </div>
-            </div>
-            <div class="ls-benefits">
-                <div class="ls-benefit"><div>{svg_small("shield")}</div><div><strong>Seguro</strong><br>Processamento local. Seus dados não são armazenados.</div></div>
-                <div class="ls-benefit"><div>{svg_small("bolt")}</div><div><strong>Rápido</strong><br>Geração automática das atas com agilidade e precisão.</div></div>
-                <div class="ls-benefit"><div>{svg_small("doc")}</div><div><strong>Confiável</strong><br>Baseado na versão desktop do LicitaSuite.</div></div>
-            </div>
+            {preview_html}
         </div>
         """, unsafe_allow_html=True)
 
-    st.markdown('<div class="ls-bottom-call"><strong>Pronto para gerar suas atas?</strong><span>Envie o arquivo ZIP do processo para iniciar.</span>', unsafe_allow_html=True)
     generate_clicked = st.button("Iniciar geração", use_container_width=True)
-    st.markdown("</div>", unsafe_allow_html=True)
 
     if uploaded_file is not None:
         UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -207,32 +211,52 @@ def main():
         if generate_clicked:
             progress = st.progress(0)
             try:
-                st.markdown("✓ Localizando motor do LicitaSuite...")
+                st.markdown("✓ Extraindo arquivos do ZIP")
+                st.markdown("✓ Localizando motor do LicitaSuite")
                 module_name, attr_name, engine_attr = find_engine()
                 st.markdown(f"✓ Motor localizado: `{module_name}.{attr_name}`")
-                progress.progress(25)
+                progress.progress(20)
 
-                st.markdown("✓ Processando documentos...")
+                st.markdown("✓ Processando documentos")
                 result = run_engine(engine_attr, zip_path)
                 progress.progress(70)
 
                 if hasattr(result, "messages"):
                     for msg in result.messages:
                         st.markdown(f"✓ {msg}")
+
                 if hasattr(result, "errors") and result.errors:
                     for err in result.errors:
                         st.error(err)
 
                 files = collect_generated_docx()
-                progress.progress(90)
+                progress.progress(85)
+
                 if not files:
                     st.error("O motor terminou, mas nenhuma Ata DOCX foi localizada em output/atas_geradas.")
                 else:
+                    st.markdown("✓ Gerando planilha de controle")
+                    status_data = build_status_data(result, OUTPUT_DIR, files)
+                    st.session_state.status_data = status_data
+
+                    controle_path = create_control_workbook(status_data, OUTPUT_DIR)
                     zip_final = make_download_zip(files)
+                    add_extra_files_to_zip(zip_final, [controle_path])
+
                     progress.progress(100)
+
                     st.success(f"{len(files)} ata(s) gerada(s).")
+                    st.info(
+                        f"Resumo: {status_data.get('total_atas', 0)} ata(s), "
+                        f"{status_data.get('total_itens', 0)} item(ns) processado(s), "
+                        f"{status_data.get('total_itens_nao_localizados', 0)} item(ns) não localizado(s)."
+                    )
+
                     with open(zip_final, "rb") as f:
-                        st.download_button("Baixar ZIP com Atas", f, "atas_geradas.zip", "application/zip", use_container_width=True)
+                        st.download_button("Baixar ZIP com Atas e Controle", f, "atas_geradas.zip", "application/zip", use_container_width=True)
+
+                    st.rerun()
+
             except Exception as exc:
                 st.error("Ocorreu um erro durante a geração.")
                 st.error(str(exc))
