@@ -27,7 +27,7 @@ class CrossChecker:
             for it in f.itens:
                 ap = ap_by_item.get(it.numero_item)
                 if not ap:
-                    msg = f"Item {it.numero_item} do fornecedor {f.razao_social} não localizado na coluna ITEM do Apêndice."
+                    msg = f"Item/Lote {getattr(it,'lote', '')}/{getattr(it,'item_display', it.numero_item)} do fornecedor {f.razao_social} não localizado no Apêndice."
                     ata.inconsistencias.append(msg)
                     inconsistencias.append(msg)
                     continue
@@ -44,6 +44,9 @@ class CrossChecker:
                     valor_unitario=it.valor_unitario,
                     valor_total=it.valor_total,
                     appendix_cells_text=ap.cells_text,
+                    lote=getattr(ap, 'lote', None),
+                    item_display=getattr(ap, 'item_display', None) or getattr(it, 'item_display', None),
+                    lote_display=getattr(ap, 'lote_display', None),
                 ))
             if ata.itens:
                 atas.append(ata)

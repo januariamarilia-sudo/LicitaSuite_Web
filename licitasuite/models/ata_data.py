@@ -13,6 +13,9 @@ class AtaItem:
     valor_unitario: float = 0.0
     valor_total: float = 0.0
     appendix_cells_text: list[str] = field(default_factory=list)
+    lote: int | None = None
+    item_display: str | None = None
+    lote_display: str | None = None
 
 @dataclass
 class AtaData:
