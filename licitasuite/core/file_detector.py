@@ -2,10 +2,11 @@ from pathlib import Path
 from docx import Document
 
 class DetectedFiles:
-    def __init__(self, modelo_ata=None, apendice=None, vencedores_pdf=None):
+    def __init__(self, modelo_ata=None, apendice=None, vencedores_pdf=None, banco_fornecedores=None):
         self.modelo_ata = modelo_ata
         self.apendice = apendice
         self.vencedores_pdf = vencedores_pdf
+        self.banco_fornecedores = banco_fornecedores
 
     def missing(self):
         missing = []
@@ -24,6 +25,7 @@ class FileDetector:
     def detect(self):
         docs = list(self.folder.rglob("*.docx"))
         pdfs = list(self.folder.rglob("*.pdf"))
+        xlsxs = list(self.folder.rglob("*.xlsx"))
 
         apendice = None
         modelo = None
@@ -58,4 +60,13 @@ class FileDetector:
         if not vencedores and pdfs:
             vencedores = pdfs[0]
 
-        return DetectedFiles(modelo, apendice, vencedores)
+        banco = None
+        for xlsx in xlsxs:
+            name = xlsx.name.lower()
+            if "banco" in name or "fornecedor" in name or "dados" in name:
+                banco = xlsx
+                break
+        if not banco and xlsxs:
+            banco = xlsxs[0]
+
+        return DetectedFiles(modelo, apendice, vencedores, banco)
