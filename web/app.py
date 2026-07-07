@@ -4,6 +4,13 @@ import traceback
 from zipfile import ZipFile, ZIP_DEFLATED
 import streamlit as st
 
+from validador_conferencia import (
+    build_conferencia,
+    write_conferencia_xlsx,
+    add_conferencia_to_zip,
+    format_conferencia_markdown,
+)
+
 try:
     from status_inteligente import (
         build_status_data,
@@ -356,6 +363,14 @@ def main():
                             add_extra_files_to_zip(zip_final, [controle_path])
                         except Exception as zip_exc:
                             st.warning(f"Atas geradas. A planilha de controle não foi incluída no ZIP: {zip_exc}")
+
+                    try:
+                        conferencia = build_conferencia(zip_path, OUTPUT_DIR, files)
+                        conferencia_file = write_conferencia_xlsx(conferencia, OUTPUT_DIR)
+                        add_conferencia_to_zip(zip_final, conferencia_file)
+                        st.markdown(format_conferencia_markdown(conferencia))
+                    except Exception as conferencia_exc:
+                        st.warning(f"Atas geradas. A conferência automática não foi concluída: {conferencia_exc}")
 
                     progress.progress(100)
 
