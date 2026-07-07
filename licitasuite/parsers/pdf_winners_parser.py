@@ -1,5 +1,8 @@
+import json
+import os
 import re
 from pathlib import Path
+
 import pdfplumber
 
 from licitasuite.models.fornecedor import Fornecedor, ItemFornecedor
@@ -15,14 +18,9 @@ MONEY_RE = re.compile(
     r"R\$\s*(?P<total>\d{1,3}(?:\.\d{3})*,\d{2,4}|\d+,\d{2,4})"
 )
 
-TOTAL_RE = re.compile(
-    r"TOTAL\s+DO\s+VENCEDOR\s+R\$\s*(?P<total>\d{1,3}(?:\.\d{3})*,\d{2,4}|\d+,\d{2,4})",
-    flags=re.I,
-)
-
 SUPPLIER_RE = re.compile(
     r"(?P<name>.+?)\s*\|\s*Tipo:\s*(?P<tipo>.*?)-\s*LC123:.*?Documento\s+(?P<cnpj>\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2})",
-    flags=re.I,
+    flags=re.I | re.S,
 )
 
 HEADER_RE = re.compile(r"(?m)^(.+?)\s+\|\s*Tipo:", flags=re.I)
@@ -56,20 +54,147 @@ class PdfWinnersParser:
 
         suppliers = self._parse_by_supplier_blocks(text)
 
-        # Fallback: mantém a lógica antiga se por algum motivo o bloco robusto falhar.
         if not suppliers:
             suppliers = self._parse_legacy_lines(text)
 
+        suppliers = self._apply_manual_supplier_locations(text, suppliers)
+
         return suppliers
 
-    # ---------------------------------------------------------------------
-    # NOVO PARSER ROBUSTO
-    # ---------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Localização manual
+    # ------------------------------------------------------------------
+
+    def _manual_names(self):
+        raw = os.environ.get("LICITASUITE_FORNECEDORES_MANUAIS", "").strip()
+        if not raw:
+            return []
+
+        try:
+            data = json.loads(raw)
+            if isinstance(data, list):
+                return [str(x).strip() for x in data if str(x).strip()]
+        except Exception:
+            pass
+
+        names = []
+        for line in raw.splitlines():
+            line = line.strip(" -•\t")
+            if line:
+                names.append(line)
+        return names
+
+    def _apply_manual_supplier_locations(self, text, suppliers):
+        manual_names = self._manual_names()
+        if not manual_names:
+            return suppliers
+
+        existing = {self._supplier_key(s.razao_social) for s in suppliers}
+        text_prepared = self._prepare_text(text)
+
+        for name in manual_names:
+            key = self._supplier_key(name)
+            if not key or key in existing:
+                continue
+
+            block = self._find_manual_block(text_prepared, name)
+            if not block:
+                continue
+
+            fornecedor = self._parse_supplier_block(block)
+
+            if not fornecedor:
+                fornecedor = self._make_supplier_from_manual_name(block, name)
+
+            if fornecedor:
+                fornecedor.itens = self._parse_item_rows_from_block(block)
+                if fornecedor.itens:
+                    suppliers.append(fornecedor)
+                    existing.add(self._supplier_key(fornecedor.razao_social))
+
+        return suppliers
+
+    def _find_manual_block(self, text, name):
+        idx = self._find_name_index(text, name)
+        if idx < 0:
+            return ""
+
+        next_header = HEADER_RE.search(text, idx + 10)
+        end = next_header.start() if next_header else len(text)
+        return text[idx:end].strip()
+
+    def _find_name_index(self, text, name):
+        # Primeira tentativa: busca literal sem acento/caixa.
+        norm_text = self._norm_for_search(text)
+        norm_name = self._norm_for_search(name)
+
+        idx_norm = norm_text.find(norm_name)
+        if idx_norm >= 0:
+            # converte aproximadamente buscando as primeiras palavras no texto original
+            first_words = " ".join(name.split()[:2]).strip()
+            if first_words:
+                m = re.search(re.escape(first_words), text, flags=re.I)
+                if m:
+                    return m.start()
+
+        # Segunda tentativa: usa as duas primeiras palavras relevantes
+        tokens = [t for t in re.split(r"\W+", norm_name) if len(t) >= 3]
+        if len(tokens) >= 2:
+            pattern = r".{0,40}".join(map(re.escape, tokens[:2]))
+            m = re.search(pattern, norm_text, flags=re.I)
+            if m:
+                trecho = text[max(0, m.start() - 80): m.start() + 120]
+                first = tokens[0]
+                m2 = re.search(first, self._norm_for_search(trecho), flags=re.I)
+                if m2:
+                    return max(0, m.start() - 80)
+
+        return -1
+
+    def _make_supplier_from_manual_name(self, block, name):
+        cnpj = ""
+        cnpj_m = CNPJ_RE.search(block)
+        if cnpj_m:
+            cnpj = cnpj_m.group(0)
+
+        tipo = self._between(block, "| Tipo:", "- LC123")
+
+        return Fornecedor(
+            razao_social=name,
+            cnpj=cnpj,
+            tipo=tipo,
+            endereco=self._between(block, "Endereço:", "CEP:"),
+            cep=self._between(block, "CEP:", "UF:"),
+            uf=self._between(block, "UF:", "Município:"),
+            municipio=self._between(block, "Município:", "Telefone:"),
+            telefone=self._after(block, "Telefone:"),
+        )
+
+    def _supplier_key(self, name):
+        n = self._norm_for_search(name)
+        n = re.sub(r"\b(LTDA|EIRELI|SA|S A|ME|EPP|SS|COMERCIO|DISTRIBUIDORA|DISTRIBUICAO|MEDICAMENTOS|PRODUTOS)\b", " ", n)
+        n = re.sub(r"\s+", " ", n).strip()
+        return n
+
+    def _norm_for_search(self, value):
+        value = value or ""
+        value = value.upper()
+        value = value.replace("Á", "A").replace("À", "A").replace("Â", "A").replace("Ã", "A")
+        value = value.replace("É", "E").replace("Ê", "E")
+        value = value.replace("Í", "I")
+        value = value.replace("Ó", "O").replace("Ô", "O").replace("Õ", "O")
+        value = value.replace("Ú", "U")
+        value = value.replace("Ç", "C")
+        value = re.sub(r"[^A-Z0-9]+", " ", value)
+        return re.sub(r"\s+", " ", value).strip()
+
+    # ------------------------------------------------------------------
+    # Parser robusto por blocos
+    # ------------------------------------------------------------------
 
     def _parse_by_supplier_blocks(self, text):
         text = self._prepare_text(text)
         headers = list(HEADER_RE.finditer(text))
-
         suppliers = []
 
         for idx, header in enumerate(headers):
@@ -83,8 +208,6 @@ class PdfWinnersParser:
 
             fornecedor.itens = self._parse_item_rows_from_block(block)
 
-            # Importante: mesmo fornecedor com um item cujo valor não foi capturado
-            # deve entrar, para não sumir ata inteira.
             if fornecedor.itens:
                 suppliers.append(fornecedor)
 
@@ -100,13 +223,13 @@ class PdfWinnersParser:
         return text
 
     def _parse_supplier_block(self, block):
-        first_part = block[:1200]
+        first_part = block[:1500]
         m = SUPPLIER_RE.search(first_part)
 
         if not m:
             return None
 
-        line = " ".join(block.splitlines()[:6])
+        line = " ".join(block.splitlines()[:8])
         line = " ".join(line.split())
 
         name = re.sub(r"\s+", " ", m.group("name")).strip(" -|")
@@ -133,14 +256,15 @@ class PdfWinnersParser:
 
         for line in lines:
             clean = " ".join(line.split())
+            n = normalize_text(clean)
 
             if self._is_supplier_line(clean):
                 continue
 
-            if normalize_text(clean).startswith("CODIGO PRODUTO"):
+            if n.startswith("CODIGO PRODUTO"):
                 continue
 
-            if normalize_text(clean).startswith("TOTAL DO VENCEDOR"):
+            if n.startswith("TOTAL DO VENCEDOR"):
                 if current:
                     rows.append(current)
                     current = ""
@@ -167,9 +291,9 @@ class PdfWinnersParser:
 
         return items
 
-    # ---------------------------------------------------------------------
-    # PARSER ANTIGO COMO FALLBACK
-    # ---------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Parser antigo como fallback
+    # ------------------------------------------------------------------
 
     def _parse_legacy_lines(self, text):
         lines = [ln.rstrip() for ln in text.splitlines() if ln.strip()]
@@ -216,8 +340,6 @@ class PdfWinnersParser:
             return False
 
         if not CNPJ_RE.search(line):
-            # No PDF, algumas linhas longas podem quebrar antes do CNPJ.
-            # Para o parser novo isso não impede, mas para o legado sim.
             return False
 
         return True
@@ -312,9 +434,6 @@ class PdfWinnersParser:
                 linha_origem=row,
             )
 
-        # Fallback para itens em que o PDF quebrou entre "R$" e o valor total.
-        # Exemplo:
-        # ... CPR R$ 0,9000 R$ 2.107.006,2000
         money_values = re.findall(r"R\$\s*([0-9\.\,]+)", body)
         qtd_un = re.search(r"(\d{1,3}(?:\.\d{3})*|\d+)\s+([A-ZÇ]{2,8})\s+R\$", body)
 
@@ -334,8 +453,6 @@ class PdfWinnersParser:
                 linha_origem=row,
             )
 
-        # Último fallback: não deixa o fornecedor sumir se o item existe.
-        # O item será levado adiante com valor 0 e linha_origem para conferência.
         return ItemFornecedor(
             numero_item=numero,
             marca=self._guess_brand(body),
