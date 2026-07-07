@@ -72,8 +72,14 @@ class Pipeline:
                 if not str(e).startswith("DUPLICIDADE NO BANCO")
                 and not str(e).startswith("Há mais de um fornecedor")
             ]
+
+            # LICITASUITE 3.2 LTS
+            # Não interrompe toda a geração por causa de uma pendência isolada.
+            # A pendência fica registrada no relatório e nas mensagens.
             if hard_errors:
-                return PipelineResult(False, messages, hard_errors)
+                messages.append("Pendências identificadas, mas a geração continuará com as atas possíveis:")
+                for err in hard_errors:
+                    messages.append("PENDÊNCIA: " + str(err))
 
             gen = CopyModelAtaGenerator(detected.modelo_ata)
             files, zip_final = gen.generate_all(result["atas"])

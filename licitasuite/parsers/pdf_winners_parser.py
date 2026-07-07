@@ -27,20 +27,27 @@ MONEY_PAIR_RE = re.compile(
     flags=re.I,
 )
 
+QTD_UN_RE = re.compile(
+    r"(?P<qtd>\d{1,3}(?:\.\d{3})*|\d+)\s+(?P<un>[A-ZÇ]{2,8})\s+R\$",
+    flags=re.I,
+)
+
 MONEY_VALUE_RE = re.compile(r"R\$\s*(\d{1,3}(?:\.\d{3})*,\d{2,4}|\d+,\d{2,4})")
 
 
 class PdfWinnersParser:
     """
-    Parser robusto do PDF de Vencedores do Processo.
+    Parser LTS para PDF de Vencedores do Processo.
 
-    Regras principais:
-    1. Identifica fornecedores por bloco, usando a linha com "| Tipo:".
-    2. Dentro de cada fornecedor, só começa a ler itens após o cabeçalho:
-       Código Produto Modelo Marca/Fabricante Qtde Valor Unitário Valor Total.
-    3. Para a leitura dos itens no TOTAL DO VENCEDOR.
-    4. Aceita CNPJ quebrado, como 03.945.035/0001-\\n91.
-    5. Não inventa valores: se não conseguir ler valor, deixa 0 e registra na linha_origem.
+    Regras:
+    - identifica fornecedores por bloco;
+    - só lê itens após o cabeçalho da tabela;
+    - para no TOTAL DO VENCEDOR;
+    - aceita CNPJ quebrado;
+    - não captura telefone/CEP como item;
+    - usa TOTAL DO VENCEDOR como validação oficial;
+    - se o fornecedor tiver item único, usa o total oficial como valor do item;
+    - se valor não for lido, mantém 0 e marca linha_origem para conferência.
     """
 
     def extract_text(self, path):
@@ -62,12 +69,16 @@ class PdfWinnersParser:
         blocks = self._split_supplier_blocks(text)
 
         suppliers = []
+
         for block in blocks:
             fornecedor = self._parse_supplier(block)
             if not fornecedor:
                 continue
 
+            fornecedor_total = self._parse_total_vencedor(block)
             fornecedor.itens = self._parse_items_only_inside_table(block)
+
+            self._apply_total_validation(fornecedor, fornecedor_total)
 
             if fornecedor.itens:
                 suppliers.append(fornecedor)
@@ -79,6 +90,7 @@ class PdfWinnersParser:
         text = text.replace("\xa0", " ")
         text = text.replace("\u00ad", "")
         text = text.replace("\ufffe", "-")
+        text = text.replace("OTO-BETNOVATE", "OTO BETNOVATE")
         text = re.sub(r"[ \t]+", " ", text)
         text = re.sub(r"\n{3,}", "\n\n", text)
         return text
@@ -97,7 +109,7 @@ class PdfWinnersParser:
         return blocks
 
     def _parse_supplier(self, block):
-        first = block[:1800]
+        first = block[:2200]
 
         cnpj_match = CNPJ_RE.search(first)
         if not cnpj_match:
@@ -117,8 +129,6 @@ class PdfWinnersParser:
         uf = self._between(first, "UF:", "Município:")
         municipio = self._between(first, "Município:", "Telefone:")
         telefone = self._after(first, "Telefone:")
-
-        # telefone pode vir junto com o cabeçalho da tabela; corta antes de Código Produto
         telefone = re.split(r"C[oó]digo\s+Produto", telefone, flags=re.I)[0].strip(" -|")
 
         return Fornecedor(
@@ -131,6 +141,12 @@ class PdfWinnersParser:
             municipio=municipio,
             telefone=telefone,
         )
+
+    def _parse_total_vencedor(self, block):
+        m = TOTAL_VENCEDOR_RE.search(block)
+        if not m:
+            return 0
+        return parse_number(m.group("total"))
 
     def _table_region(self, block):
         header = TABLE_HEADER_RE.search(block)
@@ -185,10 +201,9 @@ class PdfWinnersParser:
             return None
 
         numero = int(m.group("codigo"))
-        body = m.group("body")
+        body = self._clean_spaces(m.group("body"))
 
         money = MONEY_PAIR_RE.search(body)
-
         if money:
             qtd = parse_number(money.group("qtd"))
             unit = parse_number(money.group("unit"))
@@ -205,12 +220,11 @@ class PdfWinnersParser:
                 linha_origem=row,
             )
 
-        # Fallback: valores quebrados pelo PDF. Só usa se houver quantidade/unidade antes de R$.
-        qtd_un = re.search(r"(\d{1,3}(?:\.\d{3})*|\d+)\s+([A-ZÇ]{2,8})\s+R\$", body, flags=re.I)
+        qtd_un = QTD_UN_RE.search(body)
         valores = MONEY_VALUE_RE.findall(body)
 
         if qtd_un and valores:
-            qtd = parse_number(qtd_un.group(1))
+            qtd = parse_number(qtd_un.group("qtd"))
             unit = parse_number(valores[-2]) if len(valores) >= 2 else 0
             total = parse_number(valores[-1]) if len(valores) >= 1 else 0
             before = body[:qtd_un.start()].strip()
@@ -225,7 +239,6 @@ class PdfWinnersParser:
                 linha_origem=row,
             )
 
-        # Não inventa valor. Mantém item para relatório/conferência.
         return ItemFornecedor(
             numero_item=numero,
             marca=self._guess_brand(body),
@@ -234,6 +247,31 @@ class PdfWinnersParser:
             valor_total=0,
             linha_origem="VALOR_TOTAL_NAO_DETECTADO_MANUALMENTE | " + row,
         )
+
+    def _apply_total_validation(self, fornecedor, fornecedor_total):
+        if not fornecedor.itens or not fornecedor_total:
+            return
+
+        if len(fornecedor.itens) == 1:
+            item = fornecedor.itens[0]
+            if not item.valor_total or abs(float(item.valor_total) - float(fornecedor_total)) > 0.01:
+                item.valor_total = fornecedor_total
+                if item.quantidade_pdf:
+                    try:
+                        item.valor_unitario = fornecedor_total / item.quantidade_pdf
+                    except Exception:
+                        pass
+                item.linha_origem = str(item.linha_origem) + " | TOTAL_OFICIAL_DO_VENCEDOR_APLICADO"
+            return
+
+        soma = sum(float(getattr(item, "valor_total", 0) or 0) for item in fornecedor.itens)
+
+        if abs(soma - float(fornecedor_total)) > 0.05:
+            for item in fornecedor.itens:
+                item.linha_origem = (
+                    str(item.linha_origem)
+                    + f" | ATENCAO_SOMA_ITENS_DIVERGE_TOTAL_VENCOR={fornecedor_total}"
+                )
 
     def _guess_brand(self, text):
         text = re.sub(r"\([^)]*CONFORME EDITAL[^)]*\)", "", text, flags=re.I)
