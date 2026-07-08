@@ -6,7 +6,6 @@ from licitasuite.parsers.appendix_parser import AppendixParser
 from licitasuite.parsers.pdf_winners_parser import PdfWinnersParser
 from licitasuite.engine.cross_checker import CrossChecker
 from licitasuite.generators.docx_engine.copy_model_generator import CopyModelAtaGenerator
-from licitasuite.generators.docx_engine.formatacao_homologada import aplicar_em_lote, recriar_zip
 from licitasuite.reports.conference_report import ConferenceReport
 from licitasuite.core.supplier_database import SupplierDatabase
 
@@ -84,8 +83,6 @@ class Pipeline:
 
             gen = CopyModelAtaGenerator(detected.modelo_ata)
             files, zip_final = gen.generate_all(result["atas"])
-            aplicar_em_lote(files, result["atas"])
-            recriar_zip(files, zip_final)
 
             for ata in result["atas"]:
                 messages.append(f"- {ata.fornecedor_nome}: {len(ata.itens)} item(ns)")
