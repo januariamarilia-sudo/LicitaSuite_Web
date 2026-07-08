@@ -195,6 +195,7 @@ class PdfWinnersParser:
 
         return items
 
+
     def _parse_item(self, row):
         m = ITEM_START_RE.match(row)
         if not m:
@@ -203,31 +204,68 @@ class PdfWinnersParser:
         numero = int(m.group("codigo"))
         body = self._clean_spaces(m.group("body"))
 
+        qtd_un = QTD_UN_RE.search(body)
+
+        # Estratégia 3.4:
+        # 1. A quantidade/unidade marca o início real da área financeira.
+        # 2. O primeiro valor monetário após a quantidade é o valor unitário.
+        # 3. O próximo valor monetário após o unitário é o valor total.
+        # 4. Se o PDF quebrou o "R$" em uma linha e o número na outra,
+        #    procura o próximo número com vírgula após o unitário, mesmo sem R$.
+        if qtd_un:
+            qtd = parse_number(qtd_un.group("qtd"))
+            before = body[:qtd_un.start()].strip()
+            marca = self._guess_brand(before)
+
+            after_qtd = body[qtd_un.end():]
+
+            unit_match = MONEY_VALUE_RE.search(after_qtd)
+            if unit_match:
+                unit_text = unit_match.group(1)
+                unit = parse_number(unit_text)
+
+                after_unit = after_qtd[unit_match.end():]
+
+                # Preferência: próximo valor com R$
+                total_match = MONEY_VALUE_RE.search(after_unit)
+
+                total_text = ""
+                if total_match:
+                    total_text = total_match.group(1)
+                else:
+                    # Fallback: valor total sem R$, comum quando o PDF quebra:
+                    # "R$ 0,5817 R$ ... 2.076.958,1049"
+                    nums = re.findall(
+                        r"(?<!\d)(\d{1,3}(?:\.\d{3})+,\d{2,4}|\d+,\d{2,4})(?!\d)",
+                        after_unit,
+                    )
+
+                    # Remove eventual repetição do valor unitário.
+                    nums = [n for n in nums if n != unit_text]
+
+                    if nums:
+                        # O total normalmente é o último valor monetário do trecho do item.
+                        total_text = nums[-1]
+
+                if total_text:
+                    total = parse_number(total_text)
+
+                    return ItemFornecedor(
+                        numero_item=numero,
+                        marca=marca,
+                        quantidade_pdf=qtd,
+                        valor_unitario=unit,
+                        valor_total=total,
+                        linha_origem=row,
+                    )
+
+        # Fallback antigo, para casos em que a linha saiu perfeita.
         money = MONEY_PAIR_RE.search(body)
         if money:
             qtd = parse_number(money.group("qtd"))
             unit = parse_number(money.group("unit"))
             total = parse_number(money.group("total"))
             before = body[:money.start()].strip()
-            marca = self._guess_brand(before)
-
-            return ItemFornecedor(
-                numero_item=numero,
-                marca=marca,
-                quantidade_pdf=qtd,
-                valor_unitario=unit,
-                valor_total=total,
-                linha_origem=row,
-            )
-
-        qtd_un = QTD_UN_RE.search(body)
-        valores = MONEY_VALUE_RE.findall(body)
-
-        if qtd_un and valores:
-            qtd = parse_number(qtd_un.group("qtd"))
-            unit = parse_number(valores[-2]) if len(valores) >= 2 else 0
-            total = parse_number(valores[-1]) if len(valores) >= 1 else 0
-            before = body[:qtd_un.start()].strip()
             marca = self._guess_brand(before)
 
             return ItemFornecedor(
@@ -270,7 +308,7 @@ class PdfWinnersParser:
             for item in fornecedor.itens:
                 item.linha_origem = (
                     str(item.linha_origem)
-                    + f" | ATENCAO_SOMA_ITENS_DIVERGE_TOTAL_VENCOR={fornecedor_total}"
+                    + f" | ATENCAO_SOMA_ITENS_DIVERGE_TOTAL_VENCEDOR={fornecedor_total}"
                 )
 
     def _guess_brand(self, text):
