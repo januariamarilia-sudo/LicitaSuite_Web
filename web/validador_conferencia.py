@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 from zipfile import ZipFile, ZIP_DEFLATED
-import json
 import re
 import xml.etree.ElementTree as ET
 from typing import Any
@@ -10,9 +9,10 @@ from typing import Any
 import pdfplumber
 
 
-SUPPLIER_HEADER_RE = re.compile(r"(?m)^(.+?)\s+\|\s*Tipo:", flags=re.I)
-TOTAL_VENCEDOR_RE = re.compile(
-    r"TOTAL\s+DO\s+VENCEDOR\s+R\$\s*(?P<total>\d{1,3}(?:\.\d{3})*,\d{2,4}|\d+,\d{2,4})",
+SUPPLIER_HEADER_RE = re.compile(r"(?m)^\s*(.+?)\s*(?:\|\s*Tipo:|\s+-\s*Tipo:)", flags=re.I)
+CNPJ_RE = re.compile(r"\d{2}\.\d{3}\.\d{3}/\d{4}-\s*\d{2}")
+TOTAL_OFICIAL_RE = re.compile(
+    r"(?:TOTAL\s+DO\s+VENCEDOR|Total)\s+R\$\s*(?P<total>\d{1,3}(?:\.\d{3})*,\d{2,4}|\d+,\d{2,4})",
     flags=re.I,
 )
 ITEM_START_RE = re.compile(r"(?m)^(\d{4})\s+")
@@ -40,15 +40,12 @@ def _fmt_money(value: Any) -> str:
 
 def _norm(value: Any) -> str:
     text = str(value or "").upper()
-    repl = {
+    for a, b in {
         "Á": "A", "À": "A", "Â": "A", "Ã": "A",
-        "É": "E", "Ê": "E",
-        "Í": "I",
+        "É": "E", "Ê": "E", "Í": "I",
         "Ó": "O", "Ô": "O", "Õ": "O",
-        "Ú": "U",
-        "Ç": "C",
-    }
-    for a, b in repl.items():
+        "Ú": "U", "Ç": "C",
+    }.items():
         text = text.replace(a, b)
     text = re.sub(r"[^A-Z0-9]+", " ", text)
     return re.sub(r"\s+", " ", text).strip()
@@ -100,7 +97,7 @@ def _find_pdf_in_zip_or_folder(path: Path | None) -> Path | None:
         pdfs = list(path.rglob("*.pdf"))
         if not pdfs:
             return None
-        pdfs.sort(key=lambda p: (0 if "venced" in p.name.lower() else 1, len(p.name)))
+        pdfs.sort(key=lambda p: (0 if "venced" in p.name.lower() or "itensvencidos" in p.name.lower() else 1, len(p.name)))
         return pdfs[0]
 
     if path.is_file() and path.suffix.lower() == ".zip":
@@ -111,7 +108,7 @@ def _find_pdf_in_zip_or_folder(path: Path | None) -> Path | None:
             pdfs = [n for n in z.namelist() if n.lower().endswith(".pdf")]
             if not pdfs:
                 return None
-            pdfs.sort(key=lambda n: (0 if "venced" in n.lower() else 1, len(n)))
+            pdfs.sort(key=lambda n: (0 if "venced" in n.lower() or "itensvencidos" in n.lower() else 1, len(n)))
             out = temp / Path(pdfs[0]).name
             out.write_bytes(z.read(pdfs[0]))
             return out
@@ -119,83 +116,78 @@ def _find_pdf_in_zip_or_folder(path: Path | None) -> Path | None:
     return None
 
 
-def _split_supplier_blocks(text: str) -> list[str]:
-    headers = list(SUPPLIER_HEADER_RE.finditer(text))
+def _split_blocks(text: str) -> list[str]:
+    matches = []
+    for m in SUPPLIER_HEADER_RE.finditer(text):
+        window = text[m.start():m.start() + 1800]
+        if CNPJ_RE.search(window):
+            matches.append(m)
+
     blocks = []
-    for i, h in enumerate(headers):
-        start = h.start()
-        end = headers[i + 1].start() if i + 1 < len(headers) else len(text)
-        block = text[start:end].strip()
-        if block:
-            blocks.append(block)
+    for i, m in enumerate(matches):
+        start = m.start()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        blocks.append(text[start:end].strip())
     return blocks
+
+
+def _table_region(block: str) -> str:
+    header = re.search(r"C[oó]digo\s+Produto.*?Valor\s+Total", block, flags=re.I | re.S)
+    if not header:
+        return ""
+
+    start = header.end()
+
+    stops = []
+    m1 = re.search(r"TOTAL\s+DO\s+VENCEDOR", block[start:], flags=re.I)
+    if m1:
+        stops.append(start + m1.start())
+
+    m2 = re.search(r"(?m)^\s*Total\s+R\$", block[start:], flags=re.I)
+    if m2:
+        stops.append(start + m2.start())
+
+    end = min(stops) if stops else len(block)
+    return block[start:end].strip()
 
 
 def _parse_pdf_financeiro(pdf_path: Path) -> list[dict[str, Any]]:
     text = _prepare_text(_read_pdf_text(pdf_path))
     rows = []
 
-    for block in _split_supplier_blocks(text):
-        name_match = re.search(r"^(.+?)\s+\|\s*Tipo:", block, flags=re.I | re.M)
-        if not name_match:
+    for block in _split_blocks(text):
+        name_m = SUPPLIER_HEADER_RE.search(block)
+        if not name_m:
             continue
 
-        nome = re.sub(r"\s+", " ", name_match.group(1)).strip(" -|")
-        total_match = TOTAL_VENCEDOR_RE.search(block)
-        total_oficial = _money(total_match.group("total")) if total_match else 0.0
+        nome = re.sub(r"\s+", " ", name_m.group(1)).strip(" -|")
+        totals = [_money(m.group("total")) for m in TOTAL_OFICIAL_RE.finditer(block)]
+        total_oficial = totals[-1] if totals else 0.0
 
-        # Região entre cabeçalho da tabela e TOTAL DO VENCEDOR.
-        header = re.search(
-            r"C[oó]digo\s+Produto\s+Modelo\s+Marca/Fabricante\s+Qtde\s+Valor\s+Unit[aá]rio\s+Valor\s+Total",
-            block,
-            flags=re.I,
-        )
-
-        table = ""
-        if header:
-            start = header.end()
-            total_pos = re.search(r"TOTAL\s+DO\s+VENCEDOR", block[start:], flags=re.I)
-            end = start + total_pos.start() if total_pos else len(block)
-            table = block[start:end]
-
+        table = _table_region(block)
         item_values = []
         item_codes = []
 
         if table:
             starts = list(ITEM_START_RE.finditer(table))
             for i, s in enumerate(starts):
-                item_code = s.group(1)
-                item_codes.append(item_code)
+                item_codes.append(s.group(1))
                 start = s.start()
                 end = starts[i + 1].start() if i + 1 < len(starts) else len(table)
                 row = re.sub(r"\s+", " ", table[start:end]).strip()
 
-                # Busca valores com R$; o total é geralmente o segundo/último valor.
                 vals = MONEY_RE.findall(row)
                 if len(vals) >= 2:
                     item_values.append(_money(vals[-1]))
                 elif vals:
-                    # Se só tem um valor com R$, busca número monetário solto depois dele.
                     after = row[row.find(vals[-1]) + len(vals[-1]):]
-                    loose = ANY_MONEY_RE.findall(after)
-                    loose = [x for x in loose if x != vals[-1]]
-                    if loose:
-                        item_values.append(_money(loose[-1]))
-                    else:
-                        item_values.append(0.0)
+                    loose = [x for x in ANY_MONEY_RE.findall(after) if x != vals[-1]]
+                    item_values.append(_money(loose[-1]) if loose else 0.0)
                 else:
                     nums = ANY_MONEY_RE.findall(row)
                     item_values.append(_money(nums[-1]) if nums else 0.0)
 
-        soma_itens_pdf = sum(item_values)
-
-        if len(item_values) == 1 and total_oficial:
-            # Item único: o total oficial deve coincidir com o único item.
-            soma_itens_pdf = item_values[0]
-
-        status_soma = "OK"
-        if total_oficial and abs(soma_itens_pdf - total_oficial) > 0.05:
-            status_soma = "DIVERGENTE - CORRIGIR MANUALMENTE"
+        soma_itens = sum(item_values)
 
         rows.append({
             "nome": nome,
@@ -203,8 +195,8 @@ def _parse_pdf_financeiro(pdf_path: Path) -> list[dict[str, Any]]:
             "short_key": _short_key(nome),
             "itens_pdf": item_codes,
             "total_oficial_vencedor": total_oficial,
-            "soma_itens_pdf": soma_itens_pdf,
-            "status_soma_pdf": status_soma,
+            "soma_itens_pdf": soma_itens,
+            "status_soma_pdf": "OK" if total_oficial and abs(soma_itens - total_oficial) <= 0.05 else "DIVERGENTE - CORRIGIR MANUALMENTE",
         })
 
     return rows
@@ -234,21 +226,18 @@ def _docx_rows(docx_files: list[Path]) -> list[dict[str, Any]]:
         stem = file.stem
         nome = stem.split(" - ", 1)[1] if " - " in stem else stem
         text = _docx_text(file)
-        money_values = [_money(v) for v in MONEY_RE.findall(text)]
         rows.append({
             "arquivo": file.name,
             "nome": nome,
             "key": _supplier_key(nome),
             "short_key": _short_key(nome),
-            "text": text,
-            "money_values": money_values,
+            "money_values": [_money(v) for v in MONEY_RE.findall(text)],
         })
     return rows
 
 
-def _match_rows(pdf_rows: list[dict[str, Any]], docx_rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+def _match_rows(pdf_rows, docx_rows):
     result = {}
-
     for pdf in pdf_rows:
         key = pdf.get("key", "")
         short = pdf.get("short_key", "")
@@ -280,56 +269,45 @@ def build_conferencia(zip_path: Path | None, output_dir: Path, docx_files: list[
 
     matched = _match_rows(pdf_rows, docx_rows)
 
-    linhas_financeiras = []
+    linhas = []
     faltando_docx = []
 
     for pdf in pdf_rows:
         key = pdf["key"]
         docx = matched.get(key)
-
         total_oficial = pdf["total_oficial_vencedor"]
-        soma_itens_pdf = pdf["soma_itens_pdf"]
 
-        status_docx = "DOCX NÃO LOCALIZADO"
-        valor_encontrado_na_ata = ""
-        observacao = ""
+        status_ata = "DOCX NÃO LOCALIZADO"
+        valor_na_ata = ""
+        obs = ""
 
         if not docx:
             faltando_docx.append(pdf["nome"])
         else:
-            # Não tenta inventar o valor da ata.
-            # Apenas verifica se o TOTAL DO VENCEDOR aparece no DOCX.
-            values = docx.get("money_values", [])
-            exists = any(abs(v - total_oficial) <= 0.05 for v in values)
+            exists = any(abs(v - total_oficial) <= 0.05 for v in docx.get("money_values", []))
             if exists:
-                status_docx = "OK"
-                valor_encontrado_na_ata = _fmt_money(total_oficial)
+                status_ata = "OK"
+                valor_na_ata = _fmt_money(total_oficial)
             else:
-                status_docx = "DIVERGENTE - TOTAL DO VENCEDOR NÃO ENCONTRADO NA ATA"
-                valor_encontrado_na_ata = "NÃO LOCALIZADO"
-                observacao = "Conferir manualmente a ata. O valor oficial do vencedor não foi localizado no DOCX."
+                status_ata = "DIVERGENTE - TOTAL OFICIAL NÃO LOCALIZADO NA ATA"
+                valor_na_ata = "NÃO LOCALIZADO"
+                obs = "Conferir manualmente. O TOTAL DO VENCEDOR/Total R$ não foi localizado na ata."
 
-        status_soma = pdf["status_soma_pdf"]
-        if status_soma != "OK":
-            observacao = (
-                observacao + " | " if observacao else ""
-            ) + "Soma dos itens extraídos do PDF não fecha com TOTAL DO VENCEDOR. Corrigir manualmente."
+        if pdf["status_soma_pdf"] != "OK":
+            obs = (obs + " | " if obs else "") + "Soma dos itens extraídos do PDF não fecha com o total oficial."
 
-        linhas_financeiras.append({
+        linhas.append({
             "fornecedor": pdf["nome"],
             "itens_pdf": ", ".join(pdf.get("itens_pdf", [])),
             "total_vencedor_pdf": total_oficial,
-            "soma_itens_pdf": soma_itens_pdf,
-            "status_soma_pdf": status_soma,
-            "valor_na_ata": valor_encontrado_na_ata,
-            "status_ata": status_docx,
-            "observacao": observacao,
+            "soma_itens_pdf": pdf["soma_itens_pdf"],
+            "status_soma_pdf": pdf["status_soma_pdf"],
+            "valor_na_ata": valor_na_ata,
+            "status_ata": status_ata,
+            "observacao": obs,
         })
 
-    divergencias = [
-        x for x in linhas_financeiras
-        if x["status_soma_pdf"] != "OK" or x["status_ata"] != "OK"
-    ]
+    divergencias = [x for x in linhas if x["status_soma_pdf"] != "OK" or x["status_ata"] != "OK"]
 
     return {
         "pdf_path": str(pdf_path) if pdf_path else "",
@@ -338,7 +316,7 @@ def build_conferencia(zip_path: Path | None, output_dir: Path, docx_files: list[
         "valor_total_pdf_oficial": sum(x["total_oficial_vencedor"] for x in pdf_rows),
         "soma_itens_pdf": sum(x["soma_itens_pdf"] for x in pdf_rows),
         "faltando_docx": faltando_docx,
-        "linhas_financeiras": linhas_financeiras,
+        "linhas_financeiras": linhas,
         "divergencias_financeiras": divergencias,
         "ok": not faltando_docx and not divergencias,
     }
@@ -368,20 +346,17 @@ def write_conferencia_xlsx(conferencia: dict[str, Any], output_dir: Path) -> Pat
     for row in rows:
         ws.append(row)
 
-    ws.column_dimensions["A"].width = 36
-    ws.column_dimensions["B"].width = 100
-
-    red_fill = PatternFill("solid", fgColor="F8D7DA")
-    green_fill = PatternFill("solid", fgColor="D9EAD3")
-    yellow_fill = PatternFill("solid", fgColor="FFF3CD")
-    blue_fill = PatternFill("solid", fgColor="073F9E")
-    white_font = Font(color="FFFFFF", bold=True)
-    bold = Font(bold=True)
+    red = PatternFill("solid", fgColor="F8D7DA")
+    green = PatternFill("solid", fgColor="D9EAD3")
+    blue = PatternFill("solid", fgColor="073F9E")
+    white = Font(color="FFFFFF", bold=True)
     thin = Side(style="thin", color="D9E2F3")
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
 
     ws["A1"].font = Font(bold=True, size=15, color="073F9E")
-    ws["B7"].fill = green_fill if conferencia.get("ok") else red_fill
+    ws["B7"].fill = green if conferencia.get("ok") else red
+    ws.column_dimensions["A"].width = 36
+    ws.column_dimensions["B"].width = 100
 
     for row in ws.iter_rows():
         for cell in row:
@@ -392,7 +367,7 @@ def write_conferencia_xlsx(conferencia: dict[str, Any], output_dir: Path) -> Pat
     headers = [
         "FORNECEDOR",
         "ITENS PDF",
-        "TOTAL DO VENCEDOR PDF",
+        "TOTAL OFICIAL PDF",
         "SOMA DOS ITENS PDF",
         "STATUS SOMA PDF",
         "VALOR LOCALIZADO NA ATA",
@@ -402,8 +377,8 @@ def write_conferencia_xlsx(conferencia: dict[str, Any], output_dir: Path) -> Pat
     sh.append(headers)
 
     for cell in sh[1]:
-        cell.font = white_font
-        cell.fill = blue_fill
+        cell.fill = blue
+        cell.font = white
         cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
         cell.border = border
 
@@ -420,20 +395,14 @@ def write_conferencia_xlsx(conferencia: dict[str, Any], output_dir: Path) -> Pat
         ])
 
     for row in sh.iter_rows(min_row=2):
-        status_soma = row[4].value
-        status_ata = row[6].value
-
-        fill = None
-        if status_soma != "OK" or status_ata != "OK":
-            fill = red_fill
-
+        fill = red if row[4].value != "OK" or row[6].value != "OK" else None
         for cell in row:
             cell.alignment = Alignment(vertical="top", wrap_text=True)
             cell.border = border
             if fill:
                 cell.fill = fill
 
-    widths = [42, 28, 24, 24, 28, 26, 40, 65]
+    widths = [42, 28, 24, 24, 32, 26, 42, 70]
     for idx, width in enumerate(widths, start=1):
         sh.column_dimensions[chr(64 + idx)].width = width
 
@@ -452,11 +421,9 @@ def add_conferencia_to_zip(zip_path: Path, conferencia_file: Path) -> Path:
 
     with ZipFile(zip_path, "r") as zin:
         existing = {item.filename for item in zin.infolist()}
-
         with ZipFile(tmp, "w", ZIP_DEFLATED) as zout:
             for item in zin.infolist():
                 zout.writestr(item, zin.read(item.filename))
-
             if conferencia_file.name not in existing:
                 zout.write(conferencia_file, conferencia_file.name)
 
@@ -486,8 +453,6 @@ def format_conferencia_markdown(conferencia: dict[str, Any]) -> str:
     ]
 
     for row in conferencia.get("divergencias_financeiras", [])[:12]:
-        parts.append(
-            f"- {row['fornecedor']}: {row['status_soma_pdf']} | {row['status_ata']}"
-        )
+        parts.append(f"- {row['fornecedor']}: {row['status_soma_pdf']} | {row['status_ata']}")
 
     return "\n".join(parts)
