@@ -1,0 +1,82 @@
+ETAPA 2 — LICITASUITE WEB: STATUS INTELIGENTE + CONTROLE DE NUMERAÇÃO DAS ATAS
+
+OBJETIVO
+Ao gerar as Atas de Registro de Preços, o LicitaSuite deverá gerar também uma planilha de controle de numeração, no mesmo padrão da planilha enviada pela usuária, permitindo conferir rapidamente quantas atas foram criadas, quais fornecedores foram contemplados, quais itens foram inseridos em cada ata e qual o valor total de cada fornecedor.
+
+ARQUIVO DE REFERÊNCIA
+Utilizar como modelo a planilha:
+"Controle de numeração de ata de registro de preços e contratos - 03.07.2026.xlsx"
+
+A planilha de controle deverá seguir a estrutura principal:
+Nº | TIPO | OBJETO | PL | MODALIDADE | CONTRATADO | VALOR TOTAL
+
+ACRÉSCIMOS NECESSÁRIOS PARA O LICITASUITE
+Além das colunas principais, gerar também:
+QTDE ITENS | ITENS | ARQUIVO GERADO | OBSERVAÇÃO
+
+REGRAS DA PLANILHA GERADA
+1. Gerar uma linha por ata/fornecedor.
+2. A coluna Nº deve começar em 1 para cada novo processo enviado ao sistema.
+3. O número NÃO deve continuar a numeração geral da planilha de referência.
+4. O objetivo é criar um controle temporário do PL em geração.
+5. PL e MODALIDADE devem ser preenchidos com os dados do processo atual.
+6. CONTRATADO deve ser preenchido com o nome do fornecedor vencedor.
+7. VALOR TOTAL deve corresponder exatamente ao valor total da ata/fornecedor.
+8. QTDE ITENS deve indicar quantos itens foram inseridos naquela ata.
+9. ITENS deve listar os números dos itens daquele fornecedor.
+10. ARQUIVO GERADO deve conter exatamente o nome do DOCX gerado.
+11. OBSERVAÇÃO deve registrar:
+    - item não localizado;
+    - divergência de quantidade;
+    - divergência de valor;
+    - fornecedor sem dados cadastrais;
+    - duplicidade de fornecedor;
+    - qualquer inconsistência identificada.
+
+NOME DO ARQUIVO DE SAÍDA
+Gerar a planilha no ZIP final com o nome:
+
+CONTROLE DE NUMERAÇÃO - PL XX.2026 PE XX.2026.xlsx
+
+EXEMPLO
+Nº: 1
+TIPO: AQUISIÇÃO
+OBJETO: Registro de preços para futura e eventual aquisição...
+PL: PL 48/2026
+MODALIDADE: PE 37/2026
+CONTRATADO: MED CENTER COMERCIAL LTDA
+VALOR TOTAL: R$ 42.309,20
+QTDE ITENS: 1
+ITENS: 36
+ARQUIVO GERADO: ATA DE REGISTRO DE PREÇOS PL 48.2026 PE 37.2026 - MED CENTER.docx
+OBSERVAÇÃO: 
+
+INTEGRAÇÃO COM O STATUS INTELIGENTE
+Durante o processamento, o painel de status deve exibir:
+- Modelo da Ata localizado;
+- Apêndice localizado;
+- PDF dos vencedores localizado;
+- Banco de fornecedores localizado, se houver;
+- fornecedores identificados;
+- itens identificados por fornecedor;
+- itens do apêndice sem vencedor/localização;
+- quantidade de atas que serão geradas.
+
+Ao final, mostrar:
+- total de atas geradas;
+- total de itens processados;
+- total de itens não localizados;
+- link para baixar o ZIP;
+- link/arquivo da planilha de controle dentro do ZIP.
+
+REGRA DE SEGURANÇA
+Esta etapa não deve alterar:
+- formatação das atas;
+- motor de montagem das tabelas;
+- valores;
+- descrição dos itens;
+- assinaturas;
+- dados cadastrais;
+- layout da interface.
+
+A geração da planilha de controle deve ser uma saída adicional, sem interferir na geração das Atas DOCX.

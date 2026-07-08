@@ -1,0 +1,14 @@
+COMO APLICAR
+
+1. Extraia este ZIP.
+2. Copie as pastas web, assets e docs.
+3. Cole na raiz do projeto:
+   C:\Users\janua\Documents\LicitaSuite_Web_1.0
+4. Substitua os arquivos.
+5. No Git Bash:
+
+   git add web/app.py assets/logo_icismep_cl.png docs/INTERFACE_INSTITUCIONAL.md
+   git commit -m "Interface institucional LicitaSuite Web 1.1"
+   git push
+
+6. No Streamlit Cloud, clique em Reinício.

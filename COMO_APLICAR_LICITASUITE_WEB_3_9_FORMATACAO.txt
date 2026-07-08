@@ -1,0 +1,25 @@
+COMO APLICAR — LICITASUITE WEB 3.9 FORMATAÇÃO
+
+1. Extraia este ZIP.
+
+2. Copie para a raiz do projeto:
+   aplicar_patch_formatacao_3_9.py
+
+3. Copie a pasta:
+   docs
+
+4. No Git Bash, dentro da pasta do projeto, rode:
+
+   python aplicar_patch_formatacao_3_9.py
+
+5. Se aparecer PATCH APLICADO COM SUCESSO, rode:
+
+   git add licitasuite docs/LICITASUITE_WEB_3_9_FORMATACAO_QUANTIDADE_ASSINATURA.md aplicar_patch_formatacao_3_9.py
+   git commit -m "Formata quantidade e assinatura das atas"
+   git push
+
+6. Reinicie o Streamlit.
+
+IMPORTANTE:
+Se o patch não localizar automaticamente o gerador DOCX, não faça commit.
+Envie a mensagem que aparecer.

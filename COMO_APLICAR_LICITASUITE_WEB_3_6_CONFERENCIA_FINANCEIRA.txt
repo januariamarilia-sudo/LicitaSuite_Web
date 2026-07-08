@@ -1,0 +1,21 @@
+COMO APLICAR — LICITASUITE WEB 3.6 CONFERÊNCIA FINANCEIRA OFICIAL
+
+1. Extraia este ZIP.
+
+2. Copie o arquivo:
+   web/validador_conferencia.py
+
+3. Cole/substitua em:
+   C:\Users\janua\Documents\LicitaSuite_Web_1.0\web\validador_conferencia.py
+
+4. Copie a pasta:
+   docs
+
+5. No Git Bash:
+
+   git add web/validador_conferencia.py docs/LICITASUITE_WEB_3_6_CONFERENCIA_FINANCEIRA_OFICIAL.md
+   git commit -m "Adiciona conferencia financeira oficial"
+   git push
+
+6. Reinicie o Streamlit.
+

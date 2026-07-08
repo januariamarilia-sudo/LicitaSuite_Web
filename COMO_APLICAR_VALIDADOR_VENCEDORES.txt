@@ -1,0 +1,47 @@
+COMO APLICAR
+
+1. Extraia este ZIP.
+
+2. Copie os arquivos:
+   web/validador_vencedores.py
+   web/status_inteligente.py
+   docs/CORRECAO_VALIDADOR_VENCEDORES.md
+
+3. Cole na raiz:
+   C:\Users\janua\Documents\LicitaSuite_Web_1.0
+
+4. Substitua o status_inteligente.py existente.
+
+5. No web/app.py, faça um ajuste pequeno:
+
+Procure:
+   status_data = build_status_data(result, OUTPUT_DIR, files)
+
+Troque por:
+   status_data = build_status_data(result, OUTPUT_DIR, files, zip_path)
+
+6. Ainda no web/app.py, perto dos imports do topo, acrescente:
+
+from validador_vencedores import (
+    vencedores_from_zip,
+    compare_pdf_vs_generated,
+    format_validation_markdown,
+)
+
+7. Após:
+   files = collect_generated_docx()
+
+Cole:
+
+vencedores_pdf = vencedores_from_zip(zip_path)
+conferencia = compare_pdf_vs_generated(vencedores_pdf, files)
+st.markdown(format_validation_markdown(conferencia))
+
+8. No Git Bash:
+
+git add web/app.py web/status_inteligente.py web/validador_vencedores.py docs/CORRECAO_VALIDADOR_VENCEDORES.md
+git commit -m "Adiciona validador de vencedores"
+git push
+
+9. Reinicie o Streamlit.
+

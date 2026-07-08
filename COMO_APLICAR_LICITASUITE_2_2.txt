@@ -1,0 +1,55 @@
+COMO APLICAR
+
+1. Extraia este ZIP.
+
+2. Copie o arquivo:
+   licitasuite/parsers/pdf_winners_parser.py
+
+3. Cole/substitua em:
+   C:\Users\janua\Documents\LicitaSuite_Web_1.0\licitasuite\parsers\pdf_winners_parser.py
+
+4. Abra o arquivo:
+   web/app.py
+
+5. No topo, junto dos imports, acrescente:
+   import os
+   import json
+
+6. Antes do botão "Iniciar geração", cole:
+
+st.markdown("### Complementar localização manual de fornecedores")
+
+fornecedores_manuais = st.text_area(
+    "Se algum fornecedor não for localizado automaticamente, informe um por linha exatamente como aparece no PDF.",
+    placeholder="Exemplo:\nACÁCIA COMÉRCIO DE MEDICAMENTOS LTDA\nMEDILAR IMPORTACAO E DISTRIBUICAO DE PRODUTOS MEDICO HOSPITALARES S/A\nZION MEDPHARMA IMPORTACAO, EXPORTACAO COMERCIO E SERVICOS LTDA",
+)
+
+gerar_mesmo_com_divergencia = st.checkbox(
+    "Se ainda houver divergência, gerar mesmo assim apenas com os fornecedores encontrados.",
+    value=False,
+)
+
+7. Dentro do bloco:
+   if generate_clicked:
+
+ANTES da linha que chama o motor:
+   result = run_engine(engine_attr, zip_path)
+
+cole:
+
+nomes_manuais = [
+    linha.strip()
+    for linha in fornecedores_manuais.splitlines()
+    if linha.strip()
+]
+os.environ["LICITASUITE_FORNECEDORES_MANUAIS"] = json.dumps(nomes_manuais, ensure_ascii=False)
+os.environ["LICITASUITE_GERAR_MESMO_COM_DIVERGENCIA"] = "SIM" if gerar_mesmo_com_divergencia else "NAO"
+
+8. Depois rode:
+
+git add web/app.py licitasuite/parsers/pdf_winners_parser.py docs/LOCALIZACAO_MANUAL_FORNECEDORES.md
+git commit -m "Adiciona localizacao manual de fornecedores"
+git push
+
+9. Reinicie o Streamlit.
+

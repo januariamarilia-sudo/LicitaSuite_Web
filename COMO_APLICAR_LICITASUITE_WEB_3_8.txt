@@ -1,0 +1,23 @@
+COMO APLICAR — LICITASUITE WEB 3.8
+
+1. Extraia este ZIP.
+
+2. Copie e substitua:
+   licitasuite/parsers/pdf_winners_parser.py
+   web/validador_conferencia.py
+
+3. Cole nos respectivos locais:
+   C:\Users\janua\Documents\LicitaSuite_Web_1.0\licitasuite\parsers\pdf_winners_parser.py
+   C:\Users\janua\Documents\LicitaSuite_Web_1.0\web\validador_conferencia.py
+
+4. Copie a pasta:
+   docs
+
+5. No Git Bash:
+
+   git add licitasuite/parsers/pdf_winners_parser.py web/validador_conferencia.py docs/LICITASUITE_WEB_3_8_PARSER_UNIVERSAL_CONFERENCIA.md
+   git commit -m "Adiciona parser universal e conferencia financeira"
+   git push
+
+6. Reinicie o Streamlit.
+

@@ -1,0 +1,15 @@
+COMO APLICAR — LICITASUITE WEB 3.9.1
+
+1. No gerador das atas, localize o ponto onde o nome do fornecedor é inserido na capa.
+2. Remova qualquer conversão para Title Case (.title()).
+3. Utilize o nome em caixa alta:
+
+fornecedor.razao_social.upper()
+
+4. Preserve os demais ajustes da 3.9.
+
+Depois:
+
+git add .
+git commit -m "Acabamento final da capa e formatação"
+git push

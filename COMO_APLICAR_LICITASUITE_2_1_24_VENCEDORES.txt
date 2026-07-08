@@ -1,0 +1,29 @@
+COMO APLICAR — LICITASUITE 2.1 / 24 VENCEDORES
+
+1. Extraia este ZIP.
+
+2. Copie para a raiz do projeto:
+   aplicar_patch_motor_24_vencedores.py
+
+3. Copie também a pasta:
+   licitasuite
+
+4. Cole/substitua dentro de:
+   C:\Users\janua\Documents\LicitaSuite_Web_1.0
+
+5. No Git Bash, dentro da pasta do projeto, rode:
+
+   python aplicar_patch_motor_24_vencedores.py
+
+6. Se aparecer "PATCH APLICADO COM SUCESSO", rode:
+
+   git add licitasuite/parsers/vencedores_pdf_robusto.py licitasuite aplicar_patch_motor_24_vencedores.py docs/LICITASUITE_2_1_CORRECAO_24_VENCEDORES.md
+   git commit -m "Corrige parser de vencedores para 24 fornecedores"
+   git push
+
+7. Reinicie o Streamlit.
+
+IMPORTANTE:
+Se o script NÃO mostrar "PATCH APLICADO COM SUCESSO", não faça commit.
+Copie a mensagem que aparecer e me envie.
+

@@ -1,0 +1,21 @@
+
+# PATCH OPCIONAL PARA web/status_inteligente.py
+# Objetivo: marcar em vermelho na planilha de controle quando o valor não for detectado.
+#
+# No create_control_workbook, depois de preencher as linhas, adicione a lógica:
+#
+# red_fill = PatternFill("solid", fgColor="FFC7CE")
+# red_font = Font(color="9C0006", bold=True)
+#
+# for row in ws.iter_rows(min_row=2, max_row=ws.max_row):
+#     valor_cell = row[7]   # coluna H, VALOR TOTAL, se seu layout tiver CNPJ antes
+#     obs_cell = row[11]    # coluna L, OBSERVAÇÃO
+#     valor_txt = str(valor_cell.value or "").strip()
+#     obs_txt = str(obs_cell.value or "").upper()
+#     if not valor_txt or valor_txt in {"0", "0.0", "R$ 0", "R$ 0,00"} or "VALOR" in obs_txt or "DIVERGENCIA" in obs_txt:
+#         valor_cell.fill = red_fill
+#         valor_cell.font = red_font
+#         obs_cell.fill = red_fill
+#         obs_cell.font = red_font
+#
+# Se a sua planilha tiver VALOR TOTAL na coluna G, use row[6] no lugar de row[7].

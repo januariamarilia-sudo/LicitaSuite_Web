@@ -1,0 +1,27 @@
+COMO APLICAR — LICITASUITE WEB 3.3 CONFERÊNCIA AUTOMÁTICA
+
+1. Extraia este ZIP.
+
+2. Copie o arquivo:
+   web/validador_conferencia.py
+
+3. Cole em:
+   C:\Users\janua\Documents\LicitaSuite_Web_1.0\web\validador_conferencia.py
+
+4. Copie para a raiz do projeto:
+   aplicar_patch_conferencia_3_3.py
+
+5. Copie a pasta:
+   docs
+
+6. No Git Bash, rode:
+
+   python aplicar_patch_conferencia_3_3.py
+
+7. Se aparecer PATCH APLICADO COM SUCESSO, rode:
+
+   git add web/app.py web/validador_conferencia.py docs/LICITASUITE_WEB_3_3_CONFERENCIA_AUTOMATICA.md aplicar_patch_conferencia_3_3.py
+   git commit -m "Adiciona conferencia automatica"
+   git push
+
+8. Reinicie o Streamlit.

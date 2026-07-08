@@ -1,0 +1,42 @@
+COMO APLICAR A CORREÇÃO MVP DE IDENTIFICAÇÃO DOS ARQUIVOS
+
+1. Extraia este ZIP.
+
+2. Copie a pasta:
+   licitasuite
+
+3. Cole na raiz do projeto:
+   C:\Users\janua\Documents\LicitaSuite_Web_1.0
+
+4. Quando perguntar, clique em:
+   Substituir arquivos no destino
+
+5. Abra o Git Bash na pasta:
+   C:\Users\janua\Documents\LicitaSuite_Web_1.0
+
+6. Execute:
+
+   git add licitasuite/core/file_detector.py
+   git commit -m "Corrige identificacao automatica dos arquivos"
+   git push
+
+7. No Streamlit Cloud:
+   clique em Reinício.
+
+O QUE ESSA CORREÇÃO FAZ
+
+- Identifica o modelo da Ata pelo conteúdo do DOCX, não pelo nome.
+- Identifica o Apêndice pelo conteúdo/tabela.
+- Identifica o PDF dos vencedores automaticamente.
+- Identifica planilha XLSX/XLS como banco opcional, quando existir.
+
+O QUE ESSA CORREÇÃO NÃO MEXE
+
+- Motor das atas;
+- tabelas;
+- valores;
+- quantidade;
+- formatação;
+- assinatura;
+- apêndice;
+- geração do DOCX.

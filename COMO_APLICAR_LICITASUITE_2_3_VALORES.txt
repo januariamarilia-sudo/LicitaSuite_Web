@@ -1,0 +1,23 @@
+COMO APLICAR — LICITASUITE 2.3 VALORES FIDEDIGNOS
+
+1. Extraia este ZIP.
+
+2. Copie o arquivo:
+   licitasuite/parsers/pdf_winners_parser.py
+
+3. Cole/substitua em:
+   C:\Users\janua\Documents\LicitaSuite_Web_1.0\licitasuite\parsers\pdf_winners_parser.py
+
+4. No Git Bash, rode:
+
+   git add licitasuite/parsers/pdf_winners_parser.py docs/CORRECAO_VALORES_FIDEDIGNOS.md
+   git commit -m "Corrige valores totais do PDF"
+   git push
+
+5. Reinicie o Streamlit e teste novamente.
+
+IMPORTANTE:
+Esta correção não inventa valor. Se o valor não for detectado, o item fica marcado como:
+VALOR_TOTAL_NAO_DETECTADO_MANUALMENTE
+
+Também é gerado em output/auditoria_valores_pdf.txt um relatório simples de conferência.

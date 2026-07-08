@@ -1,0 +1,25 @@
+COMO APLICAR
+
+1. Extraia este ZIP.
+
+2. Copie as pastas:
+   web
+   assets
+   docs
+
+3. Cole na raiz:
+   C:\Users\janua\Documents\LicitaSuite_Web_1.0
+
+4. Substitua os arquivos.
+
+5. No Git Bash:
+
+   git add web/app.py assets/logo_icismep_cl.png docs/INTERFACE_PREMIUM_FINAL.md
+   git commit -m "Interface premium final"
+   git push
+
+6. No Streamlit Cloud:
+   clique em Reinício.
+
+Observação:
+Esta atualização é somente visual. Não altera o motor das atas.

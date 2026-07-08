@@ -1,0 +1,21 @@
+COMO APLICAR — LICITASUITE WEB 3.7 PARSER DUPLO
+
+1. Extraia este ZIP.
+
+2. Copie o arquivo:
+   licitasuite/parsers/pdf_winners_parser.py
+
+3. Cole/substitua em:
+   C:\Users\janua\Documents\LicitaSuite_Web_1.0\licitasuite\parsers\pdf_winners_parser.py
+
+4. Copie a pasta:
+   docs
+
+5. No Git Bash:
+
+   git add licitasuite/parsers/pdf_winners_parser.py docs/LICITASUITE_WEB_3_7_PARSER_DUPLO_ITENS_VENCIDOS.md
+   git commit -m "Adiciona parser duplo para itens vencidos"
+   git push
+
+6. Reinicie o Streamlit.
+

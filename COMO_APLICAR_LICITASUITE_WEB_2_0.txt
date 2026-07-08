@@ -1,0 +1,34 @@
+COMO APLICAR — LICITASUITE WEB 2.0
+
+1. Extraia este ZIP.
+
+2. Copie as pastas:
+   web
+   assets
+   docs
+
+3. Cole na raiz:
+   C:\Users\janua\Documents\LicitaSuite_Web_1.0
+
+4. Substitua os arquivos.
+
+5. No Git Bash:
+
+   git add web/app.py web/status_inteligente.py assets/logo_icismep_cl.png docs/LICITASUITE_WEB_2_0_STATUS_INTELIGENTE.md
+   git commit -m "LicitaSuite Web 2.0 status inteligente"
+   git push
+
+6. No Streamlit Cloud:
+   clique em Reinício.
+
+O QUE ESTA VERSÃO FAZ
+
+- Painel de status inteligente;
+- Prévia real das atas e itens, quando o relatório JSON do motor estiver disponível;
+- Planilha automática de controle de numeração;
+- Inclusão da planilha no ZIP final;
+- Resumo final da geração.
+
+REGRA DE SEGURANÇA
+
+Não altera o motor de montagem dos DOCX.
