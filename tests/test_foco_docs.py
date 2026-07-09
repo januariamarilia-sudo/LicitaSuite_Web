@@ -13,12 +13,24 @@ def _sample_zip() -> bytes:
     return buffer.getvalue()
 
 
+def _nested_zip() -> bytes:
+    supplier_buffer = BytesIO()
+    with ZipFile(supplier_buffer, "w") as supplier_archive:
+        supplier_archive.writestr("Contrato Social.pdf", b"contrato")
+
+    buffer = BytesIO()
+    with ZipFile(buffer, "w") as archive:
+        archive.writestr("EMPRESA EXEMPLO.zip", supplier_buffer.getvalue())
+    return buffer.getvalue()
+
+
 def test_foco_docs_classifies_and_repackages_documents():
     source = _sample_zip()
     qualification = "Licença sanitária e AFE da ANVISA."
     analysis = analyze_document_zip(source, "Genérico", qualification)
 
     assert analysis["technical_qualification"] == qualification
+    assert analysis["suppliers"] == ["fornecedor"]
     assert analysis["totals"] == {
         "BÁSICOS": 1,
         "TÉCNICOS": 1,
@@ -26,13 +38,46 @@ def test_foco_docs_classifies_and_repackages_documents():
     }
     assert analysis["ocr_candidates"] == 1
 
-    organized = build_organized_zip(source, analysis)
+    organized = build_organized_zip(
+        source,
+        analysis,
+        ("relatorio_itens_vencidos.csv", b"fornecedor;item"),
+    )
     with ZipFile(BytesIO(organized)) as archive:
         names = archive.namelist()
-        assert any(name.startswith("01_DOCUMENTOS_BASICOS/") for name in names)
-        assert any(name.startswith("02_DOCUMENTOS_TECNICOS/") for name in names)
+        assert (
+            "fornecedor/01 - Documentos Exigidos/7.2.1 Comprovante de CNPJ.pdf"
+            in names
+        )
+        assert (
+            "fornecedor/01 - Documentos Exigidos/"
+            "10.9 Atestado de Capacidade Técnica.pdf"
+            in names
+        )
+        assert (
+            "fornecedor/02 - Documentos Não Identificados/foto_documento.png"
+            in names
+        )
+        assert "fornecedor/RELATÓRIO DE CONFERÊNCIA.txt" in names
+        assert "00 - Referência/relatorio_itens_vencidos.csv" in names
         assert "RELATORIO_INTELIGENCIA_DOCUMENTAL.csv" in names
         assert "CHECKLIST_DOCUMENTAL.txt" in names
         checklist = archive.read("CHECKLIST_DOCUMENTAL.txt").decode("utf-8")
         assert "QUALIFICAÇÃO TÉCNICA EXIGIDA" in checklist
         assert qualification in checklist
+
+
+def test_foco_docs_extracts_nested_supplier_zip():
+    source = _nested_zip()
+    analysis = analyze_document_zip(source, "Genérico")
+
+    assert analysis["suppliers"] == ["EMPRESA EXEMPLO"]
+    assert analysis["documents"][0]["standardized_name"].startswith("7.1.1")
+
+    organized = build_organized_zip(source, analysis)
+    with ZipFile(BytesIO(organized)) as archive:
+        assert (
+            "EMPRESA EXEMPLO/01 - Documentos Exigidos/"
+            "7.1.1 Contrato Social.pdf"
+            in archive.namelist()
+        )

@@ -371,7 +371,7 @@ def render_processes() -> None:
                 placeholder="Informe uma descrição curta do objeto da contratação.",
             )
             technical_qualification = st.text_area(
-                "Qualificação técnica exigida",
+                "Qualificação técnica exigida (opcional)",
                 placeholder=(
                     "Descreva as licenças, autorizações, registros, atestados, "
                     "certificados e demais exigências técnicas deste processo."
@@ -438,7 +438,7 @@ def render_processes() -> None:
                 st.rerun()
 
             technical_qualification = st.text_area(
-                "Qualificação técnica exigida",
+                "Qualificação técnica exigida (opcional)",
                 value=process.get("technical_qualification", ""),
                 placeholder="Descreva as exigências técnicas previstas no edital.",
                 key=f"technical_qualification_{process['id']}",
@@ -505,7 +505,12 @@ def render_foco_docs() -> None:
             use_container_width=True,
         )
 
-    st.markdown("### Processar pacote documental")
+    st.markdown("### Organizar e renomear documentos dos fornecedores")
+    st.caption(
+        "Envie um ZIP contendo uma pasta para cada fornecedor. O sistema extrai "
+        "todos os arquivos, renomeia os documentos reconhecidos pelo item do edital "
+        "e preserva os demais em uma pasta separada."
+    )
     process_options = {
         process["id"]: f"{process['number']} — {process['object']}"
         for process in st.session_state.portal_processes
@@ -530,26 +535,35 @@ def render_foco_docs() -> None:
             st.markdown("**Qualificação técnica exigida neste processo:**")
             st.info(technical_qualification)
         else:
-            st.warning(
-                "Este processo ainda não possui qualificação técnica cadastrada. "
-                "Preencha o campo no módulo Processos antes da conferência final."
+            st.caption(
+                "Qualificação técnica não informada — este campo é opcional e "
+                "não impede a separação dos documentos."
             )
     else:
         technical_qualification = ""
-        st.warning(
-            "Cadastre o processo e sua qualificação técnica no módulo Processos "
-            "para vincular a conferência documental."
+        st.caption(
+            "A vinculação a um processo é opcional para organizar este pacote."
         )
 
-    profile = st.selectbox("Perfil documental", list(PROFILE_CHECKLISTS))
-    uploaded_zip = st.file_uploader(
-        "ZIP da documentação",
+    profile = st.selectbox("Modelo de conferência", list(PROFILE_CHECKLISTS))
+    upload_col1, upload_col2 = st.columns(2)
+    uploaded_zip = upload_col1.file_uploader(
+        "1. ZIP com as pastas dos fornecedores",
         type=["zip"],
         key="foco_docs_upload",
-        help="O ZIP será classificado em documentos básicos, técnicos e não classificados.",
+        help="Dentro do ZIP, mantenha uma pasta com o nome de cada fornecedor.",
+    )
+    winners_report = upload_col2.file_uploader(
+        "2. Relatório de itens vencidos (opcional)",
+        type=["pdf", "xlsx", "xls", "csv"],
+        key="foco_docs_winners_report",
+        help=(
+            "O relatório será incluído no pacote como referência para a "
+            "conferência dos catálogos e registros dos produtos."
+        ),
     )
     process = st.button(
-        "Processar documentação — Um Clique",
+        "Separar e renomear todos os documentos",
         type="primary",
         use_container_width=True,
         disabled=uploaded_zip is None,
@@ -564,13 +578,28 @@ def render_foco_docs() -> None:
                 profile,
                 technical_qualification,
             )
-            progress.progress(70, text="Montando checklist e pastas...")
-            organized_zip = build_organized_zip(source_bytes, analysis)
+            progress.progress(
+                70,
+                text="Separando fornecedores e renomeando documentos...",
+            )
+            reference_file = (
+                (winners_report.name, winners_report.getvalue())
+                if winners_report is not None
+                else None
+            )
+            organized_zip = build_organized_zip(
+                source_bytes,
+                analysis,
+                reference_file,
+            )
             st.session_state.foco_docs_result = {
                 "analysis": analysis,
                 "zip": organized_zip,
                 "source_name": uploaded_zip.name,
                 "process_id": selected_process["id"] if selected_process else None,
+                "winners_report": (
+                    winners_report.name if winners_report is not None else None
+                ),
             }
             progress.progress(100, text="Organização concluída.")
         except ValueError as exc:
@@ -580,8 +609,9 @@ def render_foco_docs() -> None:
     result = st.session_state.get("foco_docs_result")
     if not result:
         st.caption(
-            "O resultado incluirá checklist, relatório CSV e um novo ZIP com "
-            "pastas organizadas."
+            "Você receberá um único ZIP. Dentro dele, cada fornecedor terá a pasta "
+            "'01 - Documentos Exigidos', a pasta '02 - Documentos Não Identificados' "
+            "e seu relatório de conferência."
         )
         return
 
@@ -591,8 +621,11 @@ def render_foco_docs() -> None:
     metric_cols[1].metric("Básicos", analysis["totals"]["BÁSICOS"])
     metric_cols[2].metric("Técnicos", analysis["totals"]["TÉCNICOS"])
     metric_cols[3].metric(
-        "Não classificados",
+        "Não identificados",
         analysis["totals"]["NÃO CLASSIFICADOS"],
+    )
+    st.caption(
+        f"{len(analysis.get('suppliers', []))} fornecedor(es) localizado(s) no pacote."
     )
 
     if analysis["ocr_candidates"]:
@@ -608,7 +641,10 @@ def render_foco_docs() -> None:
         st.dataframe(
             [
                 {
-                    "Arquivo": document["name"],
+                    "Fornecedor": document["supplier"],
+                    "Arquivo original": document["name"],
+                    "Nome organizado": document["standardized_name"],
+                    "Identificado": "Sim" if document["identified"] else "Não",
                     "Categoria": document["category"],
                     "Extensão": document["extension"],
                     "Tamanho (KB)": round(document["size"] / 1024, 1),
@@ -620,9 +656,9 @@ def render_foco_docs() -> None:
         )
 
     st.download_button(
-        "Baixar ZIP documental organizado",
+        "Baixar todos os fornecedores organizados",
         data=result["zip"],
-        file_name="foco_docs_organizado.zip",
+        file_name="fornecedores_documentos_organizados.zip",
         mime="application/zip",
         use_container_width=True,
     )
