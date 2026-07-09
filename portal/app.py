@@ -1,11 +1,25 @@
 from __future__ import annotations
 
-from datetime import datetime
 from importlib import import_module
 from pathlib import Path
 import sys
 
 import streamlit as st
+
+from portal.process_store import (
+    PROCESS_STATUSES,
+    create_process,
+    format_timestamp,
+    process_metrics,
+    record_generation,
+    search_processes,
+    update_process_status,
+)
+from portal.foco_docs import (
+    PROFILE_CHECKLISTS,
+    analyze_document_zip,
+    build_organized_zip,
+)
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -15,6 +29,7 @@ UPLOAD_DIR = ROOT_DIR / "portal_data" / "uploads"
 PAGES = {
     "Visão geral": ("▦", "Acompanhe a operação em um só lugar"),
     "Processos": ("◫", "Organize processos e documentos"),
+    "FOCO DOCS": ("◇", "Classifique e organize documentos em um clique"),
     "Gerar atas": ("✦", "Use o motor homologado da versão 4.0 LTS"),
     "Fornecedores": ("◎", "Consulte e mantenha o cadastro"),
     "Relatórios": ("▥", "Visualize indicadores e conferências"),
@@ -207,26 +222,7 @@ def inject_styles() -> None:
 
 def initialize_state() -> None:
     if "portal_processes" not in st.session_state:
-        st.session_state.portal_processes = [
-            {
-                "number": "PL 49/2026",
-                "object": "Registro de preços para aquisição de materiais",
-                "status": "Atas geradas",
-                "updated": "Hoje, 09:42",
-            },
-            {
-                "number": "PL 48/2026",
-                "object": "Aquisição compartilhada de medicamentos",
-                "status": "Em conferência",
-                "updated": "Ontem, 16:18",
-            },
-            {
-                "number": "PL 45/2026",
-                "object": "Processo homologado de referência",
-                "status": "Concluído",
-                "updated": "04/07/2026",
-            },
-        ]
+        st.session_state.portal_processes = []
 
 
 def sidebar_navigation() -> str:
@@ -276,7 +272,7 @@ def render_process_card(process: dict) -> None:
             <div class="ls-process-number">{process['number']}</div>
             <div class="ls-process-object">{process['object']}</div>
             <div><span class="ls-badge">{process['status']}</span></div>
-            <div class="ls-process-object">{process['updated']}</div>
+            <div class="ls-process-object">{format_timestamp(process['updated_at'])}</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -284,12 +280,13 @@ def render_process_card(process: dict) -> None:
 
 
 def render_dashboard() -> None:
+    metrics_data = process_metrics(st.session_state.portal_processes)
     cols = st.columns(4)
     metrics = [
-        ("◫", "Processos ativos", "3", "+1 nesta semana"),
-        ("✦", "Atas geradas", "52", "Motor homologado"),
-        ("◎", "Fornecedores", "24", "Banco integrado"),
-        ("!", "Pendências", "2", "Requer conferência"),
+        ("◫", "Processos ativos", str(metrics_data["active"]), "Em acompanhamento"),
+        ("✦", "Atas geradas", str(metrics_data["atas"]), "Motor homologado"),
+        ("◎", "Fornecedores", str(metrics_data["suppliers"]), "Processados"),
+        ("!", "Pendências", str(metrics_data["pending"]), "Requer conferência"),
     ]
     for col, (icon, label, value, note) in zip(cols, metrics):
         with col:
@@ -317,8 +314,14 @@ def render_dashboard() -> None:
         """,
         unsafe_allow_html=True,
     )
-    for process in st.session_state.portal_processes:
-        render_process_card(process)
+    if st.session_state.portal_processes:
+        for process in st.session_state.portal_processes[:5]:
+            render_process_card(process)
+    else:
+        st.info(
+            "Nenhum processo cadastrado. Abra o módulo Processos para iniciar "
+            "o primeiro workspace operacional."
+        )
     st.markdown("</div>", unsafe_allow_html=True)
 
     st.markdown("#### Próximos módulos")
@@ -343,46 +346,47 @@ def render_dashboard() -> None:
 
 
 def render_processes() -> None:
-    with st.expander("Cadastrar novo processo", expanded=False):
+    with st.expander(
+        "Cadastrar novo processo",
+        expanded=not bool(st.session_state.portal_processes),
+    ):
         with st.form("new_process"):
             col1, col2 = st.columns(2)
             number = col1.text_input("Número do processo", placeholder="Ex.: PL 53/2026")
-            status = col2.selectbox(
-                "Situação inicial",
-                ["Em criação", "Arquivos recebidos", "Em processamento"],
+            modality = col2.text_input(
+                "Modalidade",
+                placeholder="Ex.: Pregão Eletrônico",
             )
             object_description = st.text_area(
                 "Objeto",
                 placeholder="Informe uma descrição curta do objeto da contratação.",
             )
+            col3, col4 = st.columns(2)
+            responsible = col3.text_input("Responsável", placeholder="Nome do responsável")
+            observations = col4.text_input(
+                "Observações iniciais",
+                placeholder="Informação opcional",
+            )
             submitted = st.form_submit_button("Criar processo", type="primary")
             if submitted:
-                if number.strip() and object_description.strip():
+                if number.strip() and modality.strip() and object_description.strip():
                     st.session_state.portal_processes.insert(
                         0,
-                        {
-                            "number": number.strip(),
-                            "object": object_description.strip(),
-                            "status": status,
-                            "updated": datetime.now().strftime("%d/%m/%Y, %H:%M"),
-                        },
+                        create_process(
+                            number,
+                            modality,
+                            object_description,
+                            responsible,
+                            observations,
+                        ),
                     )
                     st.success("Processo criado no novo ambiente.")
                     st.rerun()
                 else:
-                    st.warning("Informe o número e o objeto do processo.")
+                    st.warning("Informe o número, a modalidade e o objeto do processo.")
 
     search = st.text_input("Pesquisar processos", placeholder="Número, objeto ou situação")
-    normalized = search.casefold().strip()
-    processes = [
-        process
-        for process in st.session_state.portal_processes
-        if not normalized
-        or normalized
-        in " ".join(
-            [process["number"], process["object"], process["status"]]
-        ).casefold()
-    ]
+    processes = search_processes(st.session_state.portal_processes, search)
 
     st.markdown(
         f'<div class="ls-panel-title">{len(processes)} processo(s) encontrado(s)</div>',
@@ -390,6 +394,37 @@ def render_processes() -> None:
     )
     for process in processes:
         render_process_card(process)
+        with st.expander(f"Acompanhar {process['number']}"):
+            st.caption(
+                f"{process['modality']} • Responsável: "
+                f"{process.get('responsible') or 'Não informado'}"
+            )
+            metric_cols = st.columns(4)
+            metric_cols[0].metric("Fornecedores", process.get("suppliers", 0))
+            metric_cols[1].metric("Itens", process.get("items", 0))
+            metric_cols[2].metric("Atas", process.get("atas", 0))
+            metric_cols[3].metric("Pendências", process.get("pending", 0))
+
+            status = st.selectbox(
+                "Situação",
+                PROCESS_STATUSES,
+                index=PROCESS_STATUSES.index(process["status"]),
+                key=f"status_{process['id']}",
+            )
+            if st.button("Atualizar situação", key=f"update_{process['id']}"):
+                update_process_status(process, status)
+                st.success("Situação atualizada.")
+                st.rerun()
+
+            if process.get("observations"):
+                st.markdown(f"**Observações:** {process['observations']}")
+
+            st.markdown("**Histórico recente**")
+            for event in reversed(process.get("history", [])[-5:]):
+                st.caption(
+                    f"{format_timestamp(event['created_at'])} — "
+                    f"{event['title']}: {event['description']}"
+                )
 
 
 def legacy_app_module():
@@ -400,11 +435,115 @@ def legacy_app_module():
     return import_module("web.app")
 
 
+def render_foco_docs() -> None:
+    st.info(
+        "O FOCO DOCS organiza a documentação de fornecedores sem alterar "
+        "os arquivos originais enviados."
+    )
+    profile = st.selectbox("Perfil documental", list(PROFILE_CHECKLISTS))
+    uploaded_zip = st.file_uploader(
+        "ZIP da documentação",
+        type=["zip"],
+        key="foco_docs_upload",
+        help="O ZIP será classificado em documentos básicos, técnicos e não classificados.",
+    )
+    process = st.button(
+        "Processar documentação — Um Clique",
+        type="primary",
+        use_container_width=True,
+        disabled=uploaded_zip is None,
+    )
+
+    if process and uploaded_zip is not None:
+        progress = st.progress(15, text="Lendo o pacote documental...")
+        try:
+            source_bytes = uploaded_zip.getvalue()
+            analysis = analyze_document_zip(source_bytes, profile)
+            progress.progress(70, text="Montando checklist e pastas...")
+            organized_zip = build_organized_zip(source_bytes, analysis)
+            st.session_state.foco_docs_result = {
+                "analysis": analysis,
+                "zip": organized_zip,
+                "source_name": uploaded_zip.name,
+            }
+            progress.progress(100, text="Organização concluída.")
+        except ValueError as exc:
+            progress.empty()
+            st.error(str(exc))
+
+    result = st.session_state.get("foco_docs_result")
+    if not result:
+        st.caption(
+            "O resultado incluirá checklist, relatório CSV e um novo ZIP com "
+            "pastas organizadas."
+        )
+        return
+
+    analysis = result["analysis"]
+    metric_cols = st.columns(4)
+    metric_cols[0].metric("Documentos", len(analysis["documents"]))
+    metric_cols[1].metric("Básicos", analysis["totals"]["BÁSICOS"])
+    metric_cols[2].metric("Técnicos", analysis["totals"]["TÉCNICOS"])
+    metric_cols[3].metric(
+        "Não classificados",
+        analysis["totals"]["NÃO CLASSIFICADOS"],
+    )
+
+    if analysis["ocr_candidates"]:
+        st.warning(
+            f"{analysis['ocr_candidates']} imagem(ns) marcada(s) como candidata(s) "
+            "a OCR na próxima camada de inteligência."
+        )
+
+    tab_checklist, tab_documents = st.tabs(["Checklist", "Documentos"])
+    with tab_checklist:
+        st.dataframe(analysis["checklist"], use_container_width=True, hide_index=True)
+    with tab_documents:
+        st.dataframe(
+            [
+                {
+                    "Arquivo": document["name"],
+                    "Categoria": document["category"],
+                    "Extensão": document["extension"],
+                    "Tamanho (KB)": round(document["size"] / 1024, 1),
+                }
+                for document in analysis["documents"]
+            ],
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    st.download_button(
+        "Baixar ZIP documental organizado",
+        data=result["zip"],
+        file_name="foco_docs_organizado.zip",
+        mime="application/zip",
+        use_container_width=True,
+    )
+
+
 def render_ata_generator() -> None:
     st.info(
         "Este módulo utiliza o motor homologado da LicitaSuite Web 4.0 LTS "
         "(Build v2.2). A nova interface não altera as regras de geração."
     )
+
+    process_options = {
+        process["id"]: f"{process['number']} — {process['object']}"
+        for process in st.session_state.portal_processes
+    }
+    selected_process_id = None
+    if process_options:
+        selected_process_id = st.selectbox(
+            "Vincular geração ao processo",
+            list(process_options),
+            format_func=process_options.get,
+        )
+    else:
+        st.warning(
+            "Cadastre um processo antes de gerar atas, para que o resultado fique "
+            "registrado na Central de Processos."
+        )
 
     with st.container(border=True):
         st.markdown("### Enviar processo")
@@ -421,7 +560,7 @@ def render_ata_generator() -> None:
             "Iniciar geração de atas",
             type="primary",
             use_container_width=True,
-            disabled=uploaded_file is None,
+            disabled=uploaded_file is None or selected_process_id is None,
         )
 
     if uploaded_file is None or not generate:
@@ -446,6 +585,20 @@ def render_ata_generator() -> None:
             return
 
         final_zip = legacy.make_download_zip(files)
+        selected_process = next(
+            process
+            for process in st.session_state.portal_processes
+            if process["id"] == selected_process_id
+        )
+        result_errors = getattr(result, "errors", []) or []
+        record_generation(
+            selected_process,
+            atas=len(files),
+            suppliers=getattr(result, "suppliers_count", len(files)),
+            items=getattr(result, "items_count", 0),
+            pending=len(result_errors),
+            artifact=final_zip.name,
+        )
         progress.progress(100, text="Geração concluída.")
         st.success(f"{len(files)} ata(s) gerada(s) por {module_name}.{attr_name}.")
         with final_zip.open("rb") as generated_file:
@@ -456,9 +609,9 @@ def render_ata_generator() -> None:
                 mime="application/zip",
                 use_container_width=True,
             )
-        if hasattr(result, "errors") and result.errors:
+        if result_errors:
             with st.expander("Avisos da geração"):
-                for error in result.errors:
+                for error in result_errors:
                     st.warning(str(error))
     except Exception as exc:
         progress.empty()
@@ -484,10 +637,21 @@ def render_suppliers() -> None:
 
 
 def render_reports() -> None:
+    metrics_data = process_metrics(st.session_state.portal_processes)
     col1, col2, col3 = st.columns(3)
-    col1.metric("Processos concluídos", "1")
-    col2.metric("Taxa sem divergências", "96%")
-    col3.metric("Atas no período", "52")
+    col1.metric("Processos concluídos", metrics_data["completed"])
+    total_processes = len(st.session_state.portal_processes)
+    clean_processes = sum(
+        not process.get("pending", 0)
+        for process in st.session_state.portal_processes
+        if process.get("atas", 0)
+    )
+    processed = sum(
+        bool(process.get("atas", 0)) for process in st.session_state.portal_processes
+    )
+    rate = round((clean_processes / processed) * 100) if processed else 0
+    col2.metric("Taxa sem divergências", f"{rate}%")
+    col3.metric("Atas processadas", metrics_data["atas"])
     st.markdown(
         """
         <div class="ls-panel">
@@ -527,6 +691,7 @@ def main() -> None:
     renderers = {
         "Visão geral": render_dashboard,
         "Processos": render_processes,
+        "FOCO DOCS": render_foco_docs,
         "Gerar atas": render_ata_generator,
         "Fornecedores": render_suppliers,
         "Relatórios": render_reports,
