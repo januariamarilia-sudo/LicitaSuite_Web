@@ -139,3 +139,16 @@ O fluxo atual do FOCO DOCS já executa processamento de um clique sobre o ZIP.
 OCR completo, integrações públicas, banco persistente, PWA offline e motor de
 regras avançado permanecem como próximas camadas, pois exigem infraestrutura
 específica e validação própria.
+
+## Portal de Compras Públicas
+
+O fluxo operacional informado utiliza:
+
+- número do pregão;
+- órgão comprador `ICISMEP`;
+- busca pública em `processos?processo=...&orgao=ICISMEP`.
+
+O FOCO DOCS gera essa busca diretamente. A transferência automática sem
+download depende da API oficial oferecida pelo Portal para parceiros e
+compradores. A interface deixa o conector preparado e aponta para a solicitação
+oficial de integração; não utiliza endpoints privados nem contorna autenticação.

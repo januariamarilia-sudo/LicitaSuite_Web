@@ -25,6 +25,10 @@ from portal.foco_docs import (
     analyze_document_zip,
     build_organized_zip,
 )
+from portal.portal_compras import (
+    PORTAL_PARTNERS_URL,
+    build_process_search_url,
+)
 
 
 WEB_DIR = ROOT_DIR / "web"
@@ -444,6 +448,37 @@ def render_foco_docs() -> None:
         "O FOCO DOCS organiza a documentação de fornecedores sem alterar "
         "os arquivos originais enviados."
     )
+    with st.expander("Buscar documentos no Portal de Compras Públicas", expanded=True):
+        portal_col1, portal_col2 = st.columns(2)
+        process_number = portal_col1.text_input(
+            "Número do pregão",
+            placeholder="Ex.: 39/2026",
+            key="portal_process_number",
+        )
+        agency = portal_col2.text_input(
+            "Órgão comprador",
+            value="ICISMEP",
+            key="portal_agency",
+        )
+        search_url = build_process_search_url(process_number, agency)
+        st.link_button(
+            "Localizar processo e documentos no Portal",
+            search_url,
+            use_container_width=True,
+            disabled=not process_number.strip(),
+        )
+        st.caption(
+            "A busca já abre filtrada pelo pregão e pelo órgão. O Portal oferece "
+            "integração direta por API para compradores e parceiros; o conector "
+            "automático será habilitado quando a credencial oficial estiver disponível."
+        )
+        st.link_button(
+            "Solicitar integração oficial do Portal",
+            PORTAL_PARTNERS_URL,
+            use_container_width=True,
+        )
+
+    st.markdown("### Processar pacote documental")
     profile = st.selectbox("Perfil documental", list(PROFILE_CHECKLISTS))
     uploaded_zip = st.file_uploader(
         "ZIP da documentação",
