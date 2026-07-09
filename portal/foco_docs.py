@@ -462,6 +462,22 @@ def identify_document(filename: str, extracted_text: str = "") -> dict | None:
     return None
 
 
+def document_group(code: str) -> str:
+    if code.startswith("7.0"):
+        return "Documentos iniciais"
+    if code.startswith("7.1"):
+        return "Habilitação jurídica"
+    if code == "7.2.6":
+        return "Regularidade trabalhista"
+    if code.startswith("7.2"):
+        return "Regularidade fiscal"
+    if code.startswith("7.3"):
+        return "Qualificação econômico-financeira"
+    if code.startswith("10.9"):
+        return "Qualificação técnica"
+    return "Outros documentos"
+
+
 def _ocr_document(filename: str, content: bytes) -> str:
     try:
         import fitz
@@ -1160,6 +1176,9 @@ def analyze_document_zip(
                 "identified": identification is not None,
                 "document_code": identification["code"] if identification else "",
                 "document_label": identification["label"] if identification else "",
+                "document_group": document_group(
+                    identification["code"] if identification else ""
+                ),
                 "identification_confidence": (
                     identification["confidence"] if identification else 0
                 ),

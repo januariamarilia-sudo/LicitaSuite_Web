@@ -629,6 +629,11 @@ def render_foco_docs() -> None:
                 ),
             }
             st.session_state.pop("foco_docs_print_result", None)
+            for group_index in range(7):
+                st.session_state.pop(
+                    f"foco_docs_print_selection_{group_index}",
+                    None,
+                )
             progress.progress(100, text="Organização concluída.")
         except ValueError as exc:
             progress.empty()
@@ -670,10 +675,11 @@ def render_foco_docs() -> None:
     with tab_checklist:
         st.dataframe(analysis["checklist"], use_container_width=True, hide_index=True)
     with tab_documents:
-        print_rows = [
+        all_print_rows = [
             {
                     "Selecionar": False,
                     "ID": document["source"],
+                    "Grupo": document["document_group"],
                     "Fornecedor": document["supplier"],
                     "Arquivo original": document["name"],
                     "Nome organizado": document["standardized_name"],
@@ -691,30 +697,55 @@ def render_foco_docs() -> None:
                 for document in analysis["documents"]
                 if document["extension"] == ".pdf"
         ]
-        edited_documents = st.data_editor(
-            print_rows,
-            use_container_width=True,
-            hide_index=True,
-            disabled=[
-                column
-                for column in print_rows[0]
-                if column != "Selecionar"
-            ]
-            if print_rows
-            else True,
-            column_config={
-                "Selecionar": st.column_config.CheckboxColumn(
-                    "Imprimir",
-                    help="Marque os documentos que deseja reunir para impressão.",
-                    default=False,
-                ),
-                "ID": None,
-            },
-            key="foco_docs_print_selection",
+        group_names = (
+            "Documentos iniciais",
+            "Habilitação jurídica",
+            "Regularidade fiscal",
+            "Regularidade trabalhista",
+            "Qualificação econômico-financeira",
+            "Qualificação técnica",
+            "Outros documentos",
         )
-        selected_sources = [
-            row["ID"] for row in edited_documents if row["Selecionar"]
-        ]
+        group_tabs = st.tabs(group_names)
+        selected_sources = []
+        for group_index, (group_name, group_tab) in enumerate(
+            zip(group_names, group_tabs)
+        ):
+            with group_tab:
+                group_rows = [
+                    row for row in all_print_rows if row["Grupo"] == group_name
+                ]
+                if not group_rows:
+                    st.caption("Nenhum documento localizado neste grupo.")
+                    continue
+                edited_documents = st.data_editor(
+                    group_rows,
+                    use_container_width=True,
+                    hide_index=True,
+                    disabled=[
+                        column
+                        for column in group_rows[0]
+                        if column != "Selecionar"
+                    ],
+                    column_config={
+                        "Selecionar": st.column_config.CheckboxColumn(
+                            "Imprimir",
+                            help=(
+                                "Marque os documentos que deseja reunir "
+                                "para impressão."
+                            ),
+                            default=False,
+                        ),
+                        "ID": None,
+                        "Grupo": None,
+                    },
+                    key=f"foco_docs_print_selection_{group_index}",
+                )
+                selected_sources.extend(
+                    row["ID"]
+                    for row in edited_documents
+                    if row["Selecionar"]
+                )
         st.caption(
             f"{len(selected_sources)} documento(s) selecionado(s) para impressão."
         )

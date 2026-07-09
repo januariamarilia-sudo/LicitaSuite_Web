@@ -52,6 +52,16 @@ def test_foco_docs_classifies_and_repackages_documents():
 
     assert analysis["technical_qualification"] == qualification
     assert analysis["suppliers"] == ["fornecedor"]
+    groups = {
+        document["name"]: document["document_group"]
+        for document in analysis["documents"]
+    }
+    assert groups["CNPJ.pdf"] == "Regularidade fiscal"
+    assert (
+        groups["Atestado Capacidade Tecnica.pdf"]
+        == "Qualificação técnica"
+    )
+    assert groups["foto_documento.png"] == "Outros documentos"
     assert analysis["totals"] == {
         "BÁSICOS": 1,
         "TÉCNICOS": 1,
