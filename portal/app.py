@@ -234,7 +234,7 @@ def sidebar_navigation() -> str:
         st.markdown(
             """
             <div class="ls-brand">
-                <div class="ls-brand-name">Receita Suite-JMCM</div>
+                <div class="ls-brand-name">Licita Suite-JM.adm</div>
                 <div class="ls-brand-version">Gestão operacional • Ambiente 4.1</div>
             </div>
             """,
@@ -258,7 +258,7 @@ def render_topbar(page: str) -> None:
         f"""
         <div class="ls-topbar">
             <div>
-                <div class="ls-eyebrow">Receita Suite-JMCM</div>
+                <div class="ls-eyebrow">Licita Suite-JM.adm</div>
                 <div class="ls-title">{page}</div>
                 <div class="ls-subtitle">{subtitle}</div>
             </div>
@@ -505,8 +505,8 @@ def render_reports() -> None:
 def render_settings() -> None:
     with st.container(border=True):
         st.markdown("### Identidade do novo ambiente")
-        st.text_input("Nome da aplicação", value="Receita Suite-JMCM")
-        st.text_input("Organização", value="JMCM")
+        st.text_input("Nome da aplicação", value="Licita Suite-JM.adm")
+        st.text_input("Organização", value="JM.adm")
         st.selectbox("Ambiente", ["Evolução", "Homologação", "Produção"])
         st.toggle("Exibir módulos em desenvolvimento", value=True)
         st.button("Salvar preferências", type="primary")
@@ -514,7 +514,7 @@ def render_settings() -> None:
 
 def main() -> None:
     st.set_page_config(
-        page_title="Receita Suite-JMCM",
+        page_title="Licita Suite-JM.adm",
         page_icon="📑",
         layout="wide",
         initial_sidebar_state="expanded",
