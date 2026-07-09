@@ -62,6 +62,12 @@ def test_foco_docs_classifies_and_repackages_documents():
         == "Qualificação técnica"
     )
     assert groups["foto_documento.png"] == "Outros documentos"
+    cnpj_document = next(
+        document
+        for document in analysis["documents"]
+        if document["name"] == "CNPJ.pdf"
+    )
+    assert "receita.fazenda.gov.br" in cnpj_document["validation_url"]
     assert analysis["totals"] == {
         "BÁSICOS": 1,
         "TÉCNICOS": 1,

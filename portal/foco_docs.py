@@ -478,6 +478,54 @@ def document_group(code: str) -> str:
     return "Outros documentos"
 
 
+def document_validation(code: str) -> tuple[str, str]:
+    official_links = {
+        "7.0.1": (
+            "https://www.gov.br/compras/pt-br/sicaf-digital",
+            "Consulta no SICAF/Compras.gov.br.",
+        ),
+        "7.2.1": (
+            "https://solucoes.receita.fazenda.gov.br/Servicos/"
+            "cnpjreva/Cnpjreva_S.aspx",
+            "Consulta cadastral na Receita Federal.",
+        ),
+        "7.2.2": (
+            "https://servicos.receita.fazenda.gov.br/servicos/certidao/",
+            "Consulta e autenticação na Receita Federal/PGFN.",
+        ),
+        "7.2.5": (
+            "https://consulta-crf.caixa.gov.br/consultacrf/pages/"
+            "consultaEmpregador.jsf",
+            "Consulta do CRF no site da CAIXA.",
+        ),
+        "7.2.6": (
+            "https://www.tst.jus.br/certidao1",
+            "Emissão e validação da CNDT no TST.",
+        ),
+        "10.9.2": (
+            "https://www.gov.br/anvisa/pt-br/sistemas/sistema-de-consultas",
+            "Consulta pública de empresas e AFE na Anvisa.",
+        ),
+        "10.9.3": (
+            "https://www.gov.br/anvisa/pt-br/sistemas/sistema-de-consultas",
+            "Consulta pública do registro do produto na Anvisa.",
+        ),
+    }
+    regional_notes = {
+        "7.2.3": "Validar no portal da Secretaria da Fazenda do estado emissor.",
+        "7.2.4": "Validar no portal da prefeitura/município emissor.",
+        "7.3.1": "Validar no portal do Tribunal de Justiça emissor.",
+        "10.9.1": "Validar na Vigilância Sanitária estadual ou municipal emissora.",
+        "10.9": "Validar no conselho profissional que emitiu o certificado.",
+    }
+    if code in official_links:
+        return official_links[code]
+    return "", regional_notes.get(
+        code,
+        "Conferência documental sem consulta pública única.",
+    )
+
+
 def _ocr_document(filename: str, content: bytes) -> str:
     try:
         import fitz
@@ -1142,6 +1190,9 @@ def analyze_document_zip(
         )
         identification = identify_document(filename, searchable_text)
         validity = _detect_validity(filename, searchable_text)
+        validation_url, validation_note = document_validation(
+            identification["code"] if identification else ""
+        )
         supplier = _supplier_from_source(
             entry["source"],
             winners,
@@ -1179,6 +1230,8 @@ def analyze_document_zip(
                 "document_group": document_group(
                     identification["code"] if identification else ""
                 ),
+                "validation_url": validation_url,
+                "validation_note": validation_note,
                 "identification_confidence": (
                     identification["confidence"] if identification else 0
                 ),

@@ -690,6 +690,8 @@ def render_foco_docs() -> None:
                     "Identificado por": document["identified_by"],
                     "Validade": document["validity_date"] or "-",
                     "Situação": document["validity_status"],
+                    "Validar no site oficial": document["validation_url"] or None,
+                    "Orientação": document["validation_note"],
                     "Categoria": document["category"],
                     "Extensão": document["extension"],
                     "Tamanho (KB)": round(document["size"] / 1024, 1),
@@ -738,6 +740,11 @@ def render_foco_docs() -> None:
                         ),
                         "ID": None,
                         "Grupo": None,
+                        "Validar no site oficial": st.column_config.LinkColumn(
+                            "Validar",
+                            help="Abre o portal oficial para conferência.",
+                            display_text="Abrir site oficial",
+                        ),
                     },
                     key=f"foco_docs_print_selection_{group_index}",
                 )
