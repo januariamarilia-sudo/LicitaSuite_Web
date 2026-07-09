@@ -110,3 +110,18 @@ def test_foco_docs_extracts_tar_inside_zip():
     assert len(analysis["documents"]) == 1
     assert analysis["documents"][0]["document_code"] == "7.2.3"
     assert analysis["documents"][0]["supplier"] == "FORNECEDOR TESTE"
+
+
+def test_foco_docs_flags_expired_validity_from_filename():
+    buffer = BytesIO()
+    with ZipFile(buffer, "w") as archive:
+        archive.writestr(
+            "FORNECEDOR/CNPJ - VAL. 01-01-2020.pdf",
+            b"documento",
+        )
+
+    analysis = analyze_document_zip(buffer.getvalue(), "Padrão geral")
+    document = analysis["documents"][0]
+
+    assert document["validity_date"] == "01/01/2020"
+    assert document["validity_status"] == "Vencido"

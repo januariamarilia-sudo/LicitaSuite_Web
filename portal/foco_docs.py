@@ -3,6 +3,7 @@ from __future__ import annotations
 from io import BytesIO, StringIO
 from pathlib import PurePosixPath
 import csv
+from datetime import date, datetime
 import re
 import tarfile
 import unicodedata
@@ -461,21 +462,92 @@ def identify_document(filename: str, extracted_text: str = "") -> dict | None:
     return None
 
 
-def _extract_searchable_text(filename: str, content: bytes) -> str:
+def _ocr_document(filename: str, content: bytes) -> str:
+    try:
+        import fitz
+        import pytesseract
+        from PIL import Image
+
+        suffix = PurePosixPath(filename).suffix.casefold()
+        if suffix == ".pdf":
+            pdf = fitz.open(stream=content, filetype="pdf")
+            texts = []
+            for page in pdf:
+                pixmap = page.get_pixmap(matrix=fitz.Matrix(1.8, 1.8), alpha=False)
+                image = Image.open(BytesIO(pixmap.tobytes("png")))
+                texts.append(pytesseract.image_to_string(image, lang="por"))
+            return "\n".join(texts)
+        if suffix in {".png", ".jpg", ".jpeg", ".tif", ".tiff"}:
+            return pytesseract.image_to_string(
+                Image.open(BytesIO(content)),
+                lang="por",
+            )
+    except Exception:
+        return ""
+    return ""
+
+
+def _extract_searchable_text(filename: str, content: bytes) -> tuple[str, bool]:
     suffix = PurePosixPath(filename).suffix.casefold()
     try:
         if suffix == ".pdf":
             with pdfplumber.open(BytesIO(content)) as pdf:
-                return " ".join(
+                text = " ".join(
                     page.extract_text() or ""
                     for page in pdf.pages
                 )
+            if len(text.strip()) >= 80:
+                return text, False
+            ocr_text = _ocr_document(filename, content)
+            return ocr_text or text, bool(ocr_text)
         if suffix == ".docx":
             document = Document(BytesIO(content))
-            return " ".join(paragraph.text for paragraph in document.paragraphs)
+            return (
+                " ".join(paragraph.text for paragraph in document.paragraphs),
+                False,
+            )
+        if suffix in {".png", ".jpg", ".jpeg", ".tif", ".tiff"}:
+            ocr_text = _ocr_document(filename, content)
+            return ocr_text, bool(ocr_text)
     except Exception:
-        return ""
-    return ""
+        return "", False
+    return "", False
+
+
+def _detect_validity(filename: str, text: str) -> dict:
+    source = f"{filename}\n{text}"
+    patterns = (
+        r"(?i)(?:validade|v[aá]lid[ao]\s+at[eé]|vencimento|val\.?)"
+        r"[^0-9]{0,35}([0-3]?\d[./-][01]?\d[./-](?:20)?\d{2})",
+        r"(?i)(?:vence(?:r[aá])?\s+em)[^0-9]{0,20}"
+        r"([0-3]?\d[./-][01]?\d[./-](?:20)?\d{2})",
+    )
+    candidates = []
+    for pattern in patterns:
+        candidates.extend(re.findall(pattern, source))
+    parsed = []
+    for value in candidates:
+        normalized = value.replace(".", "/").replace("-", "/")
+        for fmt in ("%d/%m/%Y", "%d/%m/%y"):
+            try:
+                parsed.append(datetime.strptime(normalized, fmt).date())
+                break
+            except ValueError:
+                continue
+    if not parsed:
+        return {"validity_date": "", "validity_status": "Não identificada"}
+    validity = max(parsed)
+    days = (validity - date.today()).days
+    if days < 0:
+        status = "Vencido"
+    elif days <= 30:
+        status = "Vence em até 30 dias"
+    else:
+        status = "Válido"
+    return {
+        "validity_date": validity.strftime("%d/%m/%Y"),
+        "validity_status": status,
+    }
 
 
 def _parse_winners_report(reference_file: tuple[str, bytes] | None) -> list[dict]:
@@ -684,6 +756,18 @@ def _extract_all_zip_documents(
                     continue
                 except tarfile.ReadError:
                     pass
+            if entry.filename.casefold().endswith(".rar"):
+                try:
+                    extracted.extend(
+                        _extract_all_rar_documents(
+                            payload,
+                            prefix=source,
+                            limits=limits,
+                        )
+                    )
+                    continue
+                except Exception:
+                    pass
 
             limits["files"] += 1
             limits["bytes"] += len(payload)
@@ -750,6 +834,18 @@ def _extract_all_tar_documents(
                     continue
                 except tarfile.ReadError:
                     pass
+            if lowered.endswith(".rar"):
+                try:
+                    extracted.extend(
+                        _extract_all_rar_documents(
+                            payload,
+                            prefix=source,
+                            limits=limits,
+                        )
+                    )
+                    continue
+                except Exception:
+                    pass
 
             limits["files"] += 1
             limits["bytes"] += len(payload)
@@ -763,6 +859,66 @@ def _extract_all_tar_documents(
                 )
             extracted.append({"source": source, "content": payload})
     return extracted
+
+
+def _extract_all_rar_documents(
+    content: bytes,
+    *,
+    prefix: str,
+    limits: dict,
+) -> list[dict]:
+    import rarfile
+
+    extracted = []
+    with rarfile.RarFile(BytesIO(content)) as archive:
+        for info in archive.infolist():
+            if info.isdir():
+                continue
+            payload = archive.read(info)
+            limits["files"] += 1
+            limits["bytes"] += len(payload)
+            if limits["files"] > MAX_FILES:
+                raise ValueError(
+                    f"O pacote excede o limite de {MAX_FILES} arquivos."
+                )
+            if limits["bytes"] > MAX_UNCOMPRESSED_BYTES:
+                raise ValueError(
+                    "O conteúdo descompactado excede o limite de 300 MB."
+                )
+            extracted.append(
+                {
+                    "source": f"{prefix}/{info.filename}".strip("/"),
+                    "content": payload,
+                }
+            )
+    return extracted
+
+
+def _extract_package_documents(content: bytes, package_name: str = "") -> list[dict]:
+    lowered = package_name.casefold()
+    limits = {"files": 0, "bytes": 0}
+    if lowered.endswith(".rar"):
+        try:
+            return _extract_all_rar_documents(
+                content,
+                prefix="",
+                limits=limits,
+            )
+        except Exception as exc:
+            raise ValueError(
+                "Não foi possível abrir o RAR. Verifique se o arquivo está íntegro."
+            ) from exc
+    if lowered.endswith((".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2")):
+        try:
+            return _extract_all_tar_documents(
+                content,
+                prefix="",
+                depth=0,
+                limits=limits,
+            )
+        except tarfile.ReadError as exc:
+            raise ValueError("O arquivo TAR enviado não é válido.") from exc
+    return _extract_all_zip_documents(content)
 
 
 def _safe_basename(name: str) -> str:
@@ -798,6 +954,16 @@ def _supplier_from_source(
         if part and part not in {".", ".."}
     ]
     if len(parts) < 2:
+        default_digits = re.sub(r"\D", "", default_supplier)
+        if winners and len(default_digits) >= 14:
+            cnpj = default_digits[-14:]
+            for winner in winners:
+                if re.sub(r"\D", "", winner.get("cnpj", "")) == cnpj:
+                    return re.sub(
+                        r'[<>:"/\\|?*\x00-\x1f]',
+                        "_",
+                        winner.get("nome", default_supplier),
+                    ).strip(" .")
         return default_supplier or "FORNECEDOR_NAO_IDENTIFICADO"
     if winners:
         for part in parts[:-1]:
@@ -839,18 +1005,23 @@ def analyze_document_zip(
     technical_qualification: str = "",
     reference_file: tuple[str, bytes] | None = None,
     default_supplier: str = "",
+    package_name: str = "",
 ) -> dict:
     if profile not in PROFILE_CHECKLISTS:
         raise ValueError(f"Perfil documental inválido: {profile}")
 
-    entries = _extract_all_zip_documents(content)
+    entries = _extract_package_documents(content, package_name)
     winners = _parse_winners_report(reference_file)
     documents = []
     for entry in entries:
         filename = _safe_basename(entry["source"])
         suffix = PurePosixPath(filename).suffix.casefold()
-        searchable_text = _extract_searchable_text(filename, entry["content"])
+        searchable_text, ocr_used = _extract_searchable_text(
+            filename,
+            entry["content"],
+        )
         identification = identify_document(filename, searchable_text)
+        validity = _detect_validity(filename, searchable_text)
         supplier = _supplier_from_source(
             entry["source"],
             winners,
@@ -900,6 +1071,8 @@ def analyze_document_zip(
                 "size": len(entry["content"]),
                 "ocr_candidate": suffix
                 in {".png", ".jpg", ".jpeg", ".tif", ".tiff"},
+                "ocr_used": ocr_used,
+                **validity,
                 "winner_items": winner.get("itens", []) if winner else [],
             }
         )
@@ -965,6 +1138,8 @@ def analyze_document_zip(
         "checklist": checklist,
         "totals": totals,
         "ocr_candidates": sum(document["ocr_candidate"] for document in documents),
+        "ocr_processed": sum(document["ocr_used"] for document in documents),
+        "package_name": package_name,
     }
 
 
@@ -977,7 +1152,10 @@ def build_organized_zip(
     document_map = {
         document["source"]: document for document in analysis["documents"]
     }
-    extracted_entries = _extract_all_zip_documents(content)
+    extracted_entries = _extract_package_documents(
+        content,
+        analysis.get("package_name", ""),
+    )
 
     with ZipFile(output_buffer, "w", ZIP_DEFLATED) as target:
         output_names: dict[str, int] = {}
@@ -1052,6 +1230,8 @@ def build_organized_zip(
                 "extensao",
                 "tamanho_bytes",
                 "ocr",
+                "validade",
+                "situacao_validade",
             ]
         )
         for document in analysis["documents"]:
@@ -1068,7 +1248,9 @@ def build_organized_zip(
                     document["category"],
                     document["extension"],
                     document["size"],
-                    "sim" if document["ocr_candidate"] else "não",
+                    "sim" if document["ocr_used"] else "não",
+                    document["validity_date"],
+                    document["validity_status"],
                 ]
             )
         target.writestr(
@@ -1120,6 +1302,13 @@ def build_organized_zip(
             required_technical = _required_technical_documents(
                 analysis.get("technical_qualification", "")
             )
+            validity_alerts = [
+                document
+                for document in supplier_documents
+                if document["selected_for_requirement"]
+                and document["validity_status"]
+                in {"Vencido", "Vence em até 30 dias"}
+            ]
             supplier_lines = [
                 f"Fornecedor: {supplier}",
                 f"Perfil documental: {analysis['profile']}",
@@ -1161,10 +1350,66 @@ def build_organized_zip(
                     ]
                     or ["Nenhuma pendência técnica identificada."]
                 ),
+                "",
+                "ALERTAS DE VALIDADE:",
+                *(
+                    [
+                        f"[!] {document['standardized_name']} — "
+                        f"{document['validity_status']} "
+                        f"({document['validity_date']})"
+                        for document in validity_alerts
+                    ]
+                    or ["Nenhum vencimento identificado."]
+                ),
             ]
             target.writestr(
                 f"{supplier}/RELATÓRIO DE CONFERÊNCIA.txt",
                 "\n".join(supplier_lines).encode("utf-8"),
             )
+            pdf_report = _build_report_pdf(supplier_lines)
+            if pdf_report:
+                target.writestr(
+                    f"{supplier}/RELATÓRIO DE CONFERÊNCIA.pdf",
+                    pdf_report,
+                )
 
     return output_buffer.getvalue()
+
+
+def _build_report_pdf(lines: list[str]) -> bytes:
+    try:
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import getSampleStyleSheet
+        from reportlab.lib.units import cm
+        from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
+
+        output = BytesIO()
+        document = SimpleDocTemplate(
+            output,
+            pagesize=A4,
+            rightMargin=1.7 * cm,
+            leftMargin=1.7 * cm,
+            topMargin=1.5 * cm,
+            bottomMargin=1.5 * cm,
+        )
+        styles = getSampleStyleSheet()
+        story = [
+            Paragraph("RELATÓRIO DE CONFERÊNCIA DOCUMENTAL", styles["Title"]),
+            Spacer(1, 10),
+        ]
+        for line in lines:
+            if not line:
+                story.append(Spacer(1, 7))
+            elif line.endswith(":"):
+                story.append(Paragraph(line, styles["Heading3"]))
+            else:
+                safe_line = (
+                    line.replace("&", "&amp;")
+                    .replace("<", "&lt;")
+                    .replace(">", "&gt;")
+                )
+                story.append(Paragraph(safe_line, styles["BodyText"]))
+        document.build(story)
+        return output.getvalue()
+    except Exception:
+        return b""

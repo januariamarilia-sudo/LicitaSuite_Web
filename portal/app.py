@@ -569,8 +569,8 @@ def render_foco_docs() -> None:
     )
     upload_col1, upload_col2 = st.columns(2)
     uploaded_zip = upload_col1.file_uploader(
-        "1. ZIP com as pastas dos fornecedores",
-        type=["zip"],
+        "1. Pacote com as pastas dos fornecedores",
+        type=["zip", "rar", "tar", "tgz", "gz"],
         key="foco_docs_upload",
         help="Dentro do ZIP, mantenha uma pasta com o nome de cada fornecedor.",
     )
@@ -605,6 +605,7 @@ def render_foco_docs() -> None:
                 technical_qualification,
                 reference_file,
                 supplier_label_from_package(uploaded_zip.name),
+                uploaded_zip.name,
             )
             progress.progress(
                 70,
@@ -651,10 +652,14 @@ def render_foco_docs() -> None:
         f"{len(analysis.get('suppliers', []))} fornecedor(es) localizado(s) no pacote."
     )
 
-    if analysis["ocr_candidates"]:
+    if analysis["ocr_candidates"] and not analysis.get("ocr_processed"):
         st.warning(
             f"{analysis['ocr_candidates']} imagem(ns) marcada(s) como candidata(s) "
-            "a OCR na próxima camada de inteligência."
+            "a OCR, mas sem texto reconhecido."
+        )
+    if analysis.get("ocr_processed"):
+        st.success(
+            f"OCR aplicado em {analysis['ocr_processed']} documento(s) escaneado(s)."
         )
 
     tab_checklist, tab_documents = st.tabs(["Checklist", "Documentos"])
@@ -672,6 +677,8 @@ def render_foco_docs() -> None:
                         "Sim" if document["selected_for_requirement"] else "Não"
                     ),
                     "Identificado por": document["identified_by"],
+                    "Validade": document["validity_date"] or "-",
+                    "Situação": document["validity_status"],
                     "Categoria": document["category"],
                     "Extensão": document["extension"],
                     "Tamanho (KB)": round(document["size"] / 1024, 1),
