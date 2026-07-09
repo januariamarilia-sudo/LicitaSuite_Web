@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 import re
 from zipfile import ZipFile, ZIP_DEFLATED
+import xml.etree.ElementTree as ET
 
 from docx import Document
 from docx.shared import Pt
@@ -93,6 +94,146 @@ def _norm_key(name: str) -> str:
         text = text.replace(a, b)
     text = re.sub(r"[^a-z0-9]+", "_", text)
     return text.strip("_")
+
+
+def _norm_match(value: Any) -> str:
+    text = str(value or "").upper()
+    repl = {
+        "Á": "A", "À": "A", "Â": "A", "Ã": "A",
+        "É": "E", "Ê": "E", "Í": "I",
+        "Ó": "O", "Ô": "O", "Õ": "O",
+        "Ú": "U", "Ç": "C",
+    }
+    for a, b in repl.items():
+        text = text.replace(a, b)
+    text = re.sub(r"[^A-Z0-9]+", " ", text)
+    tokens = text.split()
+    stop = {
+        "LTDA", "EIRELI", "SA", "S", "A", "ME", "EPP", "SS",
+        "COMERCIO", "COM", "DISTRIBUIDORA", "DISTRIBUICAO",
+        "MEDICAMENTOS", "PRODUTOS", "PRODUTO", "HOSPITALARES",
+        "IMPORTACAO", "EXPORTACAO", "SERVICOS", "FARMACEUTICA",
+        "FARMACEUTICOS",
+    }
+    return " ".join(t for t in tokens if t not in stop)
+
+
+def _xlsx_col_to_index(ref: str) -> int:
+    letters = re.sub(r"[^A-Z]", "", str(ref or "").upper())
+    col = 0
+    for ch in letters:
+        col = col * 26 + (ord(ch) - 64)
+    return col - 1
+
+
+def _read_banco_xlsx(path: str | Path | None) -> list[dict[str, str]]:
+    if not path:
+        return []
+
+    path = Path(path)
+    if not path.exists():
+        return []
+
+    try:
+        with ZipFile(path, "r") as z:
+            names = z.namelist()
+
+            shared = []
+            if "xl/sharedStrings.xml" in names:
+                root = ET.fromstring(z.read("xl/sharedStrings.xml"))
+                ns = {"a": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+                for si in root.findall("a:si", ns):
+                    shared.append("".join(t.text or "" for t in si.findall(".//a:t", ns)))
+
+            sheet_name = "xl/worksheets/sheet1.xml"
+            if sheet_name not in names:
+                sheets = [n for n in names if n.startswith("xl/worksheets/sheet") and n.endswith(".xml")]
+                if not sheets:
+                    return []
+                sheet_name = sheets[0]
+
+            root = ET.fromstring(z.read(sheet_name))
+            ns = {"a": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+
+            matrix = []
+            for row in root.findall(".//a:row", ns):
+                values = {}
+                max_col = -1
+                for c in row.findall("a:c", ns):
+                    idx = _xlsx_col_to_index(c.attrib.get("r", ""))
+                    max_col = max(max_col, idx)
+                    v = c.find("a:v", ns)
+                    if v is None:
+                        value = ""
+                    elif c.attrib.get("t") == "s":
+                        value = shared[int(v.text)] if v.text and int(v.text) < len(shared) else ""
+                    else:
+                        value = v.text or ""
+                    values[idx] = str(value).strip()
+
+                if max_col >= 0:
+                    matrix.append([values.get(i, "") for i in range(max_col + 1)])
+
+            if not matrix:
+                return []
+
+            headers = [_norm_key(h) for h in matrix[0]]
+            rows = []
+            for raw in matrix[1:]:
+                row = {}
+                for idx, header in enumerate(headers):
+                    if header:
+                        row[header] = raw[idx].strip() if idx < len(raw) else ""
+                if any(row.values()):
+                    rows.append(row)
+            return rows
+    except Exception:
+        return []
+
+
+def _cadastro_get(cadastro: dict[str, str] | None, *names: str) -> str:
+    if not cadastro:
+        return ""
+
+    for name in names:
+        key = _norm_key(name)
+        value = cadastro.get(key, "")
+        if value:
+            return _texto(value)
+
+    return ""
+
+
+def _find_cadastro_for_ata(rows: list[dict[str, str]], ata: Any) -> dict[str, str] | None:
+    if not rows:
+        return None
+
+    nome_ata = _ata_empresa(ata)
+    cnpj_ata = _ata_cnpj(ata)
+    nome_key = _norm_match(nome_ata)
+
+    if cnpj_ata and cnpj_ata != NAO_LOCALIZADA:
+        digits = re.sub(r"\D+", "", cnpj_ata)
+        for row in rows:
+            cnpj = row.get("cnpj", "")
+            if digits and re.sub(r"\D+", "", cnpj) == digits:
+                return row
+
+    for row in rows:
+        fornecedor = row.get("fornecedor", "") or row.get("razao_social", "") or row.get("nome", "")
+        fornecedor_key = _norm_match(fornecedor)
+        if not fornecedor_key or not nome_key:
+            continue
+
+        if fornecedor_key == nome_key or fornecedor_key in nome_key or nome_key in fornecedor_key:
+            return row
+
+        a = set(nome_key.split())
+        b = set(fornecedor_key.split())
+        if a and b and len(a & b) >= min(2, len(a), len(b)):
+            return row
+
+    return None
 
 
 def _dict_like_get(obj: Any, *names: str) -> str:
@@ -237,7 +378,7 @@ def _normalizar_representante_assinatura(representante: str) -> str:
     return rep or representante
 
 
-def formatar_preambulo(document: Document, ata: Any):
+def formatar_preambulo(document: Document, ata: Any, cadastro: dict[str, str] | None = None):
     empresa = _ata_empresa(ata).upper()
     if not empresa:
         return
@@ -254,16 +395,16 @@ def formatar_preambulo(document: Document, ata: Any):
 
         processo, pregao = _extrair_processo_pregao(txt)
 
-        endereco = _ata_endereco(ata)
-        cep = _ata_cep(ata)
-        fone = _ata_fone(ata)
-        email = _ata_email(ata)
-        cnpj = _ata_cnpj(ata)
-        ie = _ata_ie(ata)
-        representante = _ata_representante(ata)
-        cpf = _ata_cpf(ata)
-        rg = _ata_rg(ata)
-        orgao = _ata_orgao(ata)
+        endereco = _fallback(_cadastro_get(cadastro, "ENDEREÇO", "ENDERECO") or _ata_endereco(ata))
+        cep = _fallback(_cadastro_get(cadastro, "CEP") or _ata_cep(ata))
+        fone = _fallback(_cadastro_get(cadastro, "FONE", "TELEFONE") or _ata_fone(ata))
+        email = _fallback(_cadastro_get(cadastro, "EMAIL", "E-MAIL") or _ata_email(ata))
+        cnpj = _fallback(_cadastro_get(cadastro, "CNPJ") or _ata_cnpj(ata))
+        ie = _cadastro_get(cadastro, "INSCRIÇÃO ESTAUDAL", "INSCRIÇÃO ESTADUAL", "IE") or _ata_ie(ata)
+        representante = _fallback(_cadastro_get(cadastro, "REPRESENTANTE") or _ata_representante(ata))
+        cpf = _fallback(_cadastro_get(cadastro, "CPF") or _ata_cpf(ata))
+        rg = _fallback(_cadastro_get(cadastro, "RG") or _ata_rg(ata))
+        orgao = _fallback(_cadastro_get(cadastro, "ORGAO", "ÓRGÃO", "ORGAO EXPEDIDOR", "ÓRGÃO EXPEDIDOR") or _ata_orgao(ata))
 
         _limpar_paragrafo(p)
         p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
@@ -314,9 +455,9 @@ def formatar_quantidade_clausula_4(document: Document):
                 _set_cell_text(cell, novo, size=8, bold=False, center=True)
 
 
-def formatar_assinaturas(document: Document, ata: Any):
-    empresa = _ata_empresa(ata)
-    representante = _ata_representante(ata)
+def formatar_assinaturas(document: Document, ata: Any, cadastro: dict[str, str] | None = None):
+    empresa = _cadastro_get(cadastro, "FORNECEDOR", "RAZÃO SOCIAL", "RAZAO SOCIAL") or _ata_empresa(ata)
+    representante = _cadastro_get(cadastro, "REPRESENTANTE") or _ata_representante(ata)
 
     if not empresa or not representante:
         return
@@ -348,23 +489,25 @@ def formatar_assinaturas(document: Document, ata: Any):
                     _run(p, empresa_ass, True)
 
 
-def aplicar_formatacao_homologada(docx_path: str | Path, ata: Any):
+def aplicar_formatacao_homologada(docx_path: str | Path, ata: Any, cadastro: dict[str, str] | None = None):
     docx_path = Path(docx_path)
     document = Document(docx_path)
 
-    formatar_preambulo(document, ata)
+    formatar_preambulo(document, ata, cadastro)
     formatar_quantidade_clausula_4(document)
-    formatar_assinaturas(document, ata)
+    formatar_assinaturas(document, ata, cadastro)
 
     document.save(docx_path)
 
 
-def aplicar_em_lote(files: list, atas: list):
+def aplicar_em_lote(files: list, atas: list, banco_path: str | Path | None = None):
+    banco_rows = _read_banco_xlsx(banco_path)
     for idx, file in enumerate(files):
         ata = atas[idx] if idx < len(atas) else None
         if not ata:
             continue
-        aplicar_formatacao_homologada(file, ata)
+        cadastro = _find_cadastro_for_ata(banco_rows, ata)
+        aplicar_formatacao_homologada(file, ata, cadastro)
 
 
 def recriar_zip(files: list, zip_path: str | Path):

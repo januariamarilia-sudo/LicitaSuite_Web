@@ -84,7 +84,7 @@ class Pipeline:
 
             gen = CopyModelAtaGenerator(detected.modelo_ata)
             files, zip_final = gen.generate_all(result["atas"])
-            aplicar_em_lote(files, result["atas"], detected.banco_fornecedores)
+            aplicar_em_lote(files, result["atas"])
             recriar_zip(files, zip_final)
 
             for ata in result["atas"]:
