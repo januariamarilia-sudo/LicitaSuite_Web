@@ -1,0 +1,21 @@
+COMO APLICAR — LICITASUITE WEB 4.0 LTS BUILD HOMOLOGADA V2.2
+
+1. Extraia este ZIP.
+
+2. Substitua:
+   licitasuite/generators/docx_engine/formatacao_homologada.py
+
+3. Copie para a raiz:
+   aplicar_patch_build_homologada_v2_2.py
+
+4. Copie a pasta docs.
+
+5. No Git Bash, rode:
+   python aplicar_patch_build_homologada_v2_2.py
+
+6. Depois:
+   git add licitasuite docs aplicar_patch_build_homologada_v2_2.py
+   git commit -m "Build homologada v2.2 - banco de dados no preambulo"
+   git push
+
+7. Reinicie o Streamlit.

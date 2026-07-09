@@ -1,0 +1,17 @@
+COMO APLICAR — LICITASUITE WEB 4.0 LTS / ENTREGA 1 CORE
+
+1. Extraia este ZIP.
+
+2. Substitua os arquivos:
+   licitasuite/parsers/pdf_winners_parser.py
+   web/validador_conferencia.py
+
+3. Copie a pasta docs.
+
+4. No Git Bash, rode:
+
+git add licitasuite/parsers/pdf_winners_parser.py web/validador_conferencia.py docs/LICITASUITE_WEB_4_0_LTS_ENTREGA_1_CORE.md
+git commit -m "LicitaSuite Web 4.0 LTS entrega 1 core"
+git push
+
+5. Reinicie o Streamlit.

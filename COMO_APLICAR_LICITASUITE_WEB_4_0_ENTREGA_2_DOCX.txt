@@ -1,0 +1,7 @@
+Substitua as rotinas de geração DOCX pelas regras desta entrega.
+
+Depois execute:
+
+git add .
+git commit -m "LicitaSuite Web 4.0 LTS entrega 2 docx"
+git push
