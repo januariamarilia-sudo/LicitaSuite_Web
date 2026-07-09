@@ -557,7 +557,8 @@ def render_foco_docs() -> None:
         ),
         help=(
             "Os documentos 10.9 só serão cobrados quando forem descritos aqui. "
-            "A parte geral 7.0, 7.1, 7.2 e 7.3 vale para todos."
+            "A parte inicial 7.0 e a habilitação 10.6, 10.7 e 10.8 "
+            "valem para todos."
         ),
         key=(
             f"foco_docs_technical_"
@@ -566,7 +567,8 @@ def render_foco_docs() -> None:
     )
     profile = "Padrão geral"
     st.caption(
-        "Conferência padrão: documentos 7.0, 7.1, 7.2 e 7.3. "
+        "Conferência padrão: documentos iniciais 7.0 e habilitação "
+        "10.6, 10.7 e 10.8. "
         "Qualificação técnica 10.9: somente quando informada acima."
     )
     upload_col1, upload_col2 = st.columns(2)
@@ -679,13 +681,13 @@ def render_foco_docs() -> None:
     with tab_validation:
         validation_codes = {
             "7.0.1",
-            "7.2.1",
-            "7.2.2",
-            "7.2.3",
-            "7.2.4",
-            "7.2.5",
-            "7.2.6",
-            "7.3.1",
+            "10.7.1",
+            "10.7.2",
+            "10.7.3",
+            "10.7.4",
+            "10.7.5",
+            "10.7.6",
+            "10.8.1",
         }
         validation_rows = [
             {
@@ -701,6 +703,21 @@ def render_foco_docs() -> None:
             if document["selected_for_requirement"]
             and document["document_code"] in validation_codes
         ]
+        for supplier in analysis.get("suppliers", []) or ["Fornecedor não identificado"]:
+            validation_rows.append(
+                {
+                    "Fornecedor": supplier,
+                    "Documento": "10.5 - Consulta Consolidada TCU / CEIS-CNEP",
+                    "Grupo": "Consulta de impedimentos",
+                    "Validade": "-",
+                    "Situação": "A conferir",
+                    "Validar no site oficial": "https://certidoes-apf.apps.tcu.gov.br/",
+                    "Orientação": (
+                        "Consultar TCU/APF e, se necessário, CEIS/CNEP no "
+                        "Portal da Transparência."
+                    ),
+                }
+            )
         if not validation_rows:
             st.info(
                 "Nenhum documento obrigatório de validação foi localizado "
@@ -712,13 +729,15 @@ def render_foco_docs() -> None:
             pending_count = sum(
                 row["Situação"] == "Não identificada" for row in validation_rows
             )
-            col_valid, col_expired, col_pending = st.columns(3)
+            review_count = sum(row["Situação"] == "A conferir" for row in validation_rows)
+            col_valid, col_expired, col_pending, col_review = st.columns(4)
             col_valid.metric("Válidos", valid_count)
             col_expired.metric("Vencidos", expired_count)
             col_pending.metric("Sem validade lida", pending_count)
+            col_review.metric("A conferir", review_count)
             st.caption(
                 "Use esta aba para conferir SICAF, CNPJ, Federal, Estadual, "
-                "Municipal, FGTS, Trabalhista e Falência."
+                "Municipal, FGTS, Trabalhista, Falência e consulta TCU/CEIS-CNEP."
             )
             st.dataframe(
                 validation_rows,

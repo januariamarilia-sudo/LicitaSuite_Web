@@ -19,22 +19,22 @@ from licitasuite.parsers.vencedores_pdf_robusto import parse_vencedores_pdf_text
 MAX_FILES = 2_000
 MAX_UNCOMPRESSED_BYTES = 300 * 1024 * 1024
 MAX_NESTED_ZIP_DEPTH = 4
-CONDITIONAL_DOCUMENT_CODES = {"7.1.2", "7.1.3"}
+CONDITIONAL_DOCUMENT_CODES = {"10.6.2", "10.6.3"}
 STANDARD_REQUIRED_CODES = {
     "7.0.1",
     "7.0.2",
     "7.0.3",
     "7.0.4",
-    "7.1.1",
-    "7.2.1",
-    "7.2.2",
-    "7.2.3",
-    "7.2.4",
-    "7.2.5",
-    "7.2.6",
-    "7.3.1",
+    "10.6.1",
+    "10.7.1",
+    "10.7.2",
+    "10.7.3",
+    "10.7.4",
+    "10.7.5",
+    "10.7.6",
+    "10.8.1",
 }
-MULTIPLE_DOCUMENT_CODES = {"7.1.1", "10.9.3"}
+MULTIPLE_DOCUMENT_CODES = {"10.6.1", "10.9.3"}
 
 DOCUMENT_RULES = (
     ("7.0.1", "SICAF", "BÁSICOS", ("sicaf",)),
@@ -60,27 +60,27 @@ DOCUMENT_RULES = (
         ),
     ),
     (
-        "7.1.1",
-        "Contrato Social",
+        "10.6.1",
+        "Ato Constitutivo e Contrato Social",
         "BÁSICOS",
         ("contrato social", "estatuto", "ato constitutivo"),
     ),
     (
-        "7.1.2",
+        "10.6.2",
         "Procuração e Documento do Representante",
         "BÁSICOS",
         ("procuracao", "procuração", "representante", "rg cpf"),
     ),
     (
-        "7.1.3",
+        "10.6.3",
         "Autorização de Empresa Estrangeira",
         "BÁSICOS",
         ("empresa estrangeira", "autorizacao funcionamento estrangeira"),
     ),
-    ("7.2.1", "Comprovante de CNPJ", "BÁSICOS", ("cnpj",)),
+    ("10.7.1", "Comprovante de CNPJ", "BÁSICOS", ("cnpj",)),
     (
-        "7.2.2",
-        "Certidão Federal",
+        "10.7.2",
+        "Certidão Federal e Seguridade Social",
         "BÁSICOS",
         (
             "certidao federal",
@@ -91,7 +91,7 @@ DOCUMENT_RULES = (
         ),
     ),
     (
-        "7.2.3",
+        "10.7.3",
         "Certidão Estadual",
         "BÁSICOS",
         (
@@ -102,7 +102,7 @@ DOCUMENT_RULES = (
         ),
     ),
     (
-        "7.2.4",
+        "10.7.4",
         "Certidão Municipal",
         "BÁSICOS",
         (
@@ -129,9 +129,9 @@ DOCUMENT_RULES = (
             "crf + carteirinha",
         ),
     ),
-    ("7.2.5", "FGTS", "BÁSICOS", ("fgts", "crf caixa", "regularidade do fgts")),
+    ("10.7.5", "FGTS", "BÁSICOS", ("fgts", "crf caixa", "regularidade do fgts")),
     (
-        "7.2.6",
+        "10.7.6",
         "Certidão Negativa de Débitos Trabalhistas",
         "BÁSICOS",
         (
@@ -142,7 +142,7 @@ DOCUMENT_RULES = (
         ),
     ),
     (
-        "7.3.1",
+        "10.8.1",
         "Certidão de Falência",
         "BÁSICOS",
         ("falencia", "falência", "recuperacao judicial", "recuperação judicial"),
@@ -223,32 +223,32 @@ CONTENT_RULES = (
         (("catalogo de produtos",), ("prospecto tecnico",)),
     ),
     (
-        "7.1.1",
-        "Contrato Social",
+        "10.6.1",
+        "Ato Constitutivo e Contrato Social",
         "BÁSICOS",
         (("contrato social",), ("alteracao contratual",), ("ato constitutivo",)),
     ),
     (
-        "7.1.2",
+        "10.6.2",
         "Procuração e Documento do Representante",
         "BÁSICOS",
         (("instrumento de procuracao",), ("outorgante", "outorgado")),
     ),
     (
-        "7.1.3",
+        "10.6.3",
         "Autorização de Empresa Estrangeira",
         "BÁSICOS",
         (("decreto de autorizacao", "empresa estrangeira"),),
     ),
     (
-        "7.2.1",
+        "10.7.1",
         "Comprovante de CNPJ",
         "BÁSICOS",
         (("comprovante de inscricao e de situacao cadastral",),),
     ),
     (
-        "7.2.2",
-        "Certidão Federal",
+        "10.7.2",
+        "Certidão Federal e Seguridade Social",
         "BÁSICOS",
         (
             ("debitos relativos a creditos tributarios federais",),
@@ -256,7 +256,7 @@ CONTENT_RULES = (
         ),
     ),
     (
-        "7.2.3",
+        "10.7.3",
         "Certidão Estadual",
         "BÁSICOS",
         (
@@ -265,7 +265,7 @@ CONTENT_RULES = (
         ),
     ),
     (
-        "7.2.4",
+        "10.7.4",
         "Certidão Municipal",
         "BÁSICOS",
         (
@@ -275,19 +275,19 @@ CONTENT_RULES = (
         ),
     ),
     (
-        "7.2.5",
+        "10.7.5",
         "FGTS",
         "BÁSICOS",
         (("certificado de regularidade do fgts",), ("regularidade do fgts", "caixa")),
     ),
     (
-        "7.2.6",
+        "10.7.6",
         "Certidão Negativa de Débitos Trabalhistas",
         "BÁSICOS",
         (("certidao negativa de debitos trabalhistas",),),
     ),
     (
-        "7.3.1",
+        "10.8.1",
         "Certidão de Falência",
         "BÁSICOS",
         (
@@ -465,13 +465,13 @@ def identify_document(filename: str, extracted_text: str = "") -> dict | None:
 def document_group(code: str) -> str:
     if code.startswith("7.0"):
         return "Documentos iniciais"
-    if code.startswith("7.1"):
+    if code.startswith("10.6"):
         return "Habilitação jurídica"
-    if code == "7.2.6":
+    if code == "10.7.6":
         return "Regularidade trabalhista"
-    if code.startswith("7.2"):
+    if code.startswith("10.7"):
         return "Regularidade fiscal"
-    if code.startswith("7.3"):
+    if code.startswith("10.8"):
         return "Qualificação econômico-financeira"
     if code.startswith("10.9"):
         return "Qualificação técnica"
@@ -507,21 +507,21 @@ def document_validation(code: str, document_text: str = "") -> tuple[str, str]:
             "https://www.gov.br/compras/pt-br/sicaf-digital",
             "Consulta no SICAF/Compras.gov.br.",
         ),
-        "7.2.1": (
+        "10.7.1": (
             "https://solucoes.receita.fazenda.gov.br/Servicos/"
             "cnpjreva/Cnpjreva_S.aspx",
             "Consulta cadastral na Receita Federal.",
         ),
-        "7.2.2": (
+        "10.7.2": (
             "https://servicos.receita.fazenda.gov.br/servicos/certidao/",
             "Consulta e autenticação na Receita Federal/PGFN.",
         ),
-        "7.2.5": (
+        "10.7.5": (
             "https://consulta-crf.caixa.gov.br/consultacrf/pages/"
             "consultaEmpregador.jsf",
             "Consulta do CRF no site da CAIXA.",
         ),
-        "7.2.6": (
+        "10.7.6": (
             "https://www.tst.jus.br/certidao1",
             "Emissão e validação da CNDT no TST.",
         ),
@@ -535,13 +535,13 @@ def document_validation(code: str, document_text: str = "") -> tuple[str, str]:
         ),
     }
     regional_notes = {
-        "7.2.3": "Validar no portal da Secretaria da Fazenda do estado emissor.",
-        "7.2.4": "Validar no portal da prefeitura/município emissor.",
-        "7.3.1": "Validar no portal do Tribunal de Justiça emissor.",
+        "10.7.3": "Validar no portal da Secretaria da Fazenda do estado emissor.",
+        "10.7.4": "Validar no portal da prefeitura/município emissor.",
+        "10.8.1": "Validar no portal do Tribunal de Justiça emissor.",
         "10.9.1": "Validar na Vigilância Sanitária estadual ou municipal emissora.",
         "10.9": "Validar no conselho profissional que emitiu o certificado.",
     }
-    regional_codes = {"7.2.3", "7.2.4", "7.3.1", "10.9.1", "10.9"}
+    regional_codes = {"10.7.3", "10.7.4", "10.8.1", "10.9.1", "10.9"}
     if code in regional_codes:
         extracted_url = _official_url_from_document(document_text)
         if extracted_url:
@@ -1528,13 +1528,13 @@ def build_organized_zip(
                 and document["document_code"]
                 in {
                     "7.0.1",
-                    "7.2.1",
-                    "7.2.2",
-                    "7.2.3",
-                    "7.2.4",
-                    "7.2.5",
-                    "7.2.6",
-                    "7.3.1",
+                    "10.7.1",
+                    "10.7.2",
+                    "10.7.3",
+                    "10.7.4",
+                    "10.7.5",
+                    "10.7.6",
+                    "10.8.1",
                 }
             ]
             supplier_lines = [
@@ -1591,6 +1591,9 @@ def build_organized_zip(
                 ),
                 "",
                 "ROTEIRO DE VALIDAÇÃO:",
+                "- 10.5 - Consulta Consolidada TCU / CEIS-CNEP | "
+                "Situação: A conferir | Conferência: "
+                "https://certidoes-apf.apps.tcu.gov.br/",
                 *(
                     [
                         f"- {document['standardized_name']} | "

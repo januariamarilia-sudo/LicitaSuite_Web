@@ -85,7 +85,7 @@ def test_foco_docs_classifies_and_repackages_documents():
         names = archive.namelist()
         assert (
             "fornecedor/01 - Documentos Exigidos/"
-            "7.2.1 - Comprovante de CNPJ.pdf"
+            "10.7.1 - Comprovante de CNPJ.pdf"
             in names
         )
         assert (
@@ -111,13 +111,13 @@ def test_foco_docs_extracts_nested_supplier_zip():
     analysis = analyze_document_zip(source, "Genérico")
 
     assert analysis["suppliers"] == ["EMPRESA EXEMPLO"]
-    assert analysis["documents"][0]["standardized_name"].startswith("7.1.1 -")
+    assert analysis["documents"][0]["standardized_name"].startswith("10.6.1 -")
 
     organized = build_organized_zip(source, analysis)
     with ZipFile(BytesIO(organized)) as archive:
         assert (
             "EMPRESA EXEMPLO/01 - Documentos Exigidos/"
-            "7.1.1 - Contrato Social.pdf"
+            "10.6.1 - Ato Constitutivo e Contrato Social.pdf"
             in archive.namelist()
         )
 
@@ -131,7 +131,7 @@ def test_foco_docs_extracts_tar_inside_zip():
     )
 
     assert len(analysis["documents"]) == 1
-    assert analysis["documents"][0]["document_code"] == "7.2.3"
+    assert analysis["documents"][0]["document_code"] == "10.7.3"
     assert analysis["documents"][0]["supplier"] == "FORNECEDOR TESTE"
 
 
@@ -177,7 +177,7 @@ def test_foco_docs_builds_one_pdf_from_selected_documents():
 
 def test_foco_docs_uses_official_regional_validation_url_from_document():
     url, note = document_validation(
-        "7.2.3",
+        "10.7.3",
         "Valide esta certidão em https://www.fazenda.mg.gov.br/validar",
     )
 
