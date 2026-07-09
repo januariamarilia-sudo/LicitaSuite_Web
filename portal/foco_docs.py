@@ -1440,6 +1440,8 @@ def build_organized_zip(
                 "ocr",
                 "validade",
                 "situacao_validade",
+                "site_validacao",
+                "orientacao_validacao",
             ]
         )
         for document in analysis["documents"]:
@@ -1459,6 +1461,8 @@ def build_organized_zip(
                     "sim" if document["ocr_used"] else "não",
                     document["validity_date"],
                     document["validity_status"],
+                    document["validation_url"],
+                    document["validation_note"],
                 ]
             )
         target.writestr(
@@ -1517,6 +1521,22 @@ def build_organized_zip(
                 and document["validity_status"]
                 in {"Vencido", "Vence em até 30 dias"}
             ]
+            validation_documents = [
+                document
+                for document in supplier_documents
+                if document["selected_for_requirement"]
+                and document["document_code"]
+                in {
+                    "7.0.1",
+                    "7.2.1",
+                    "7.2.2",
+                    "7.2.3",
+                    "7.2.4",
+                    "7.2.5",
+                    "7.2.6",
+                    "7.3.1",
+                }
+            ]
             supplier_lines = [
                 f"Fornecedor: {supplier}",
                 f"Perfil documental: {analysis['profile']}",
@@ -1568,6 +1588,20 @@ def build_organized_zip(
                         for document in validity_alerts
                     ]
                     or ["Nenhum vencimento identificado."]
+                ),
+                "",
+                "ROTEIRO DE VALIDAÇÃO:",
+                *(
+                    [
+                        f"- {document['standardized_name']} | "
+                        f"Validade: "
+                        f"{document['validity_date'] or 'não identificada'} | "
+                        f"Situação: {document['validity_status']} | "
+                        f"Conferência: "
+                        f"{document['validation_url'] or document['validation_note']}"
+                        for document in validation_documents
+                    ]
+                    or ["Nenhum documento de validação localizado."]
                 ),
             ]
             target.writestr(
