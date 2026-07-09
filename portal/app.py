@@ -6,6 +6,11 @@ import sys
 
 import streamlit as st
 
+ROOT_DIR = Path(__file__).resolve().parents[1]
+ROOT_DIR_STRING = str(ROOT_DIR)
+if ROOT_DIR_STRING not in sys.path:
+    sys.path.insert(0, ROOT_DIR_STRING)
+
 from portal.process_store import (
     PROCESS_STATUSES,
     create_process,
@@ -22,7 +27,6 @@ from portal.foco_docs import (
 )
 
 
-ROOT_DIR = Path(__file__).resolve().parents[1]
 WEB_DIR = ROOT_DIR / "web"
 UPLOAD_DIR = ROOT_DIR / "portal_data" / "uploads"
 
