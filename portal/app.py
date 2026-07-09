@@ -25,6 +25,7 @@ from portal.foco_docs import (
     PROFILE_CHECKLISTS,
     analyze_document_zip,
     build_organized_zip,
+    supplier_label_from_package,
 )
 from portal.portal_compras import (
     PORTAL_PARTNERS_URL,
@@ -545,7 +546,27 @@ def render_foco_docs() -> None:
             "A vinculação a um processo é opcional para organizar este pacote."
         )
 
-    profile = st.selectbox("Modelo de conferência", list(PROFILE_CHECKLISTS))
+    technical_qualification = st.text_area(
+        "Qualificação técnica deste pregão (opcional)",
+        value=technical_qualification,
+        placeholder=(
+            "Ex.: exigir Alvará/Licença Sanitária, AFE ANVISA, Registro ANVISA "
+            "e Certificado de Regularidade."
+        ),
+        help=(
+            "Os documentos 10.9 só serão cobrados quando forem descritos aqui. "
+            "A parte geral 7.0, 7.1, 7.2 e 7.3 vale para todos."
+        ),
+        key=(
+            f"foco_docs_technical_"
+            f"{selected_process['id'] if selected_process else 'sem_processo'}"
+        ),
+    )
+    profile = "Padrão geral"
+    st.caption(
+        "Conferência padrão: documentos 7.0, 7.1, 7.2 e 7.3. "
+        "Qualificação técnica 10.9: somente quando informada acima."
+    )
     upload_col1, upload_col2 = st.columns(2)
     uploaded_zip = upload_col1.file_uploader(
         "1. ZIP com as pastas dos fornecedores",
@@ -554,8 +575,8 @@ def render_foco_docs() -> None:
         help="Dentro do ZIP, mantenha uma pasta com o nome de cada fornecedor.",
     )
     winners_report = upload_col2.file_uploader(
-        "2. Relatório de itens vencidos (opcional)",
-        type=["pdf", "xlsx", "xls", "csv"],
+        "2. Relatório PDF de itens vencidos (opcional)",
+        type=["pdf"],
         key="foco_docs_winners_report",
         help=(
             "O relatório será incluído no pacote como referência para a "
@@ -573,19 +594,21 @@ def render_foco_docs() -> None:
         progress = st.progress(15, text="Lendo o pacote documental...")
         try:
             source_bytes = uploaded_zip.getvalue()
-            analysis = analyze_document_zip(
-                source_bytes,
-                profile,
-                technical_qualification,
-            )
-            progress.progress(
-                70,
-                text="Separando fornecedores e renomeando documentos...",
-            )
             reference_file = (
                 (winners_report.name, winners_report.getvalue())
                 if winners_report is not None
                 else None
+            )
+            analysis = analyze_document_zip(
+                source_bytes,
+                profile,
+                technical_qualification,
+                reference_file,
+                supplier_label_from_package(uploaded_zip.name),
+            )
+            progress.progress(
+                70,
+                text="Separando fornecedores e renomeando documentos...",
             )
             organized_zip = build_organized_zip(
                 source_bytes,
@@ -610,8 +633,8 @@ def render_foco_docs() -> None:
     if not result:
         st.caption(
             "Você receberá um único ZIP. Dentro dele, cada fornecedor terá a pasta "
-            "'01 - Documentos Exigidos', a pasta '02 - Documentos Não Identificados' "
-            "e seu relatório de conferência."
+            "'01 - Documentos Exigidos', a pasta '02 - Documentos Não Utilizados', "
+            "a pasta '03 - Documentos Não Identificados' e seu relatório."
         )
         return
 
@@ -645,6 +668,10 @@ def render_foco_docs() -> None:
                     "Arquivo original": document["name"],
                     "Nome organizado": document["standardized_name"],
                     "Identificado": "Sim" if document["identified"] else "Não",
+                    "Usado": (
+                        "Sim" if document["selected_for_requirement"] else "Não"
+                    ),
+                    "Identificado por": document["identified_by"],
                     "Categoria": document["category"],
                     "Extensão": document["extension"],
                     "Tamanho (KB)": round(document["size"] / 1024, 1),

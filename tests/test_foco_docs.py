@@ -1,4 +1,5 @@
 from io import BytesIO
+import tarfile
 from zipfile import ZipFile
 
 from portal.foco_docs import analyze_document_zip, build_organized_zip
@@ -24,6 +25,20 @@ def _nested_zip() -> bytes:
     return buffer.getvalue()
 
 
+def _zip_with_tar() -> bytes:
+    tar_buffer = BytesIO()
+    with tarfile.open(fileobj=tar_buffer, mode="w") as archive:
+        content = b"cnd"
+        info = tarfile.TarInfo("4 CND ESTADUAL.pdf")
+        info.size = len(content)
+        archive.addfile(info, BytesIO(content))
+
+    buffer = BytesIO()
+    with ZipFile(buffer, "w") as archive:
+        archive.writestr("HABILITAÇÃO.tar", tar_buffer.getvalue())
+    return buffer.getvalue()
+
+
 def test_foco_docs_classifies_and_repackages_documents():
     source = _sample_zip()
     qualification = "Licença sanitária e AFE da ANVISA."
@@ -46,16 +61,17 @@ def test_foco_docs_classifies_and_repackages_documents():
     with ZipFile(BytesIO(organized)) as archive:
         names = archive.namelist()
         assert (
-            "fornecedor/01 - Documentos Exigidos/7.2.1 Comprovante de CNPJ.pdf"
-            in names
-        )
-        assert (
             "fornecedor/01 - Documentos Exigidos/"
-            "10.9 Atestado de Capacidade Técnica.pdf"
+            "7.2.1 - Comprovante de CNPJ.pdf"
             in names
         )
         assert (
-            "fornecedor/02 - Documentos Não Identificados/foto_documento.png"
+            "fornecedor/02 - Documentos Não Utilizados/"
+            "Atestado Capacidade Tecnica.pdf"
+            in names
+        )
+        assert (
+            "fornecedor/03 - Documentos Não Identificados/foto_documento.png"
             in names
         )
         assert "fornecedor/RELATÓRIO DE CONFERÊNCIA.txt" in names
@@ -72,12 +88,25 @@ def test_foco_docs_extracts_nested_supplier_zip():
     analysis = analyze_document_zip(source, "Genérico")
 
     assert analysis["suppliers"] == ["EMPRESA EXEMPLO"]
-    assert analysis["documents"][0]["standardized_name"].startswith("7.1.1")
+    assert analysis["documents"][0]["standardized_name"].startswith("7.1.1 -")
 
     organized = build_organized_zip(source, analysis)
     with ZipFile(BytesIO(organized)) as archive:
         assert (
             "EMPRESA EXEMPLO/01 - Documentos Exigidos/"
-            "7.1.1 Contrato Social.pdf"
+            "7.1.1 - Contrato Social.pdf"
             in archive.namelist()
         )
+
+
+def test_foco_docs_extracts_tar_inside_zip():
+    source = _zip_with_tar()
+    analysis = analyze_document_zip(
+        source,
+        "Padrão geral",
+        default_supplier="FORNECEDOR TESTE",
+    )
+
+    assert len(analysis["documents"]) == 1
+    assert analysis["documents"][0]["document_code"] == "7.2.3"
+    assert analysis["documents"][0]["supplier"] == "FORNECEDOR TESTE"

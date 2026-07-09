@@ -4,24 +4,60 @@ from io import BytesIO, StringIO
 from pathlib import PurePosixPath
 import csv
 import re
+import tarfile
 import unicodedata
 from zipfile import ZIP_DEFLATED, BadZipFile, ZipFile
 
 import pdfplumber
 from docx import Document
+from pypdf import PdfReader, PdfWriter
+
+from licitasuite.parsers.vencedores_pdf_robusto import parse_vencedores_pdf_text
 
 
 MAX_FILES = 2_000
 MAX_UNCOMPRESSED_BYTES = 300 * 1024 * 1024
 MAX_NESTED_ZIP_DEPTH = 4
-MAX_TEXT_EXTRACTION_PAGES = 5
 CONDITIONAL_DOCUMENT_CODES = {"7.1.2", "7.1.3"}
+STANDARD_REQUIRED_CODES = {
+    "7.0.1",
+    "7.0.2",
+    "7.0.3",
+    "7.0.4",
+    "7.1.1",
+    "7.2.1",
+    "7.2.2",
+    "7.2.3",
+    "7.2.4",
+    "7.2.5",
+    "7.2.6",
+    "7.3.1",
+}
+MULTIPLE_DOCUMENT_CODES = {"7.1.1", "10.9.3"}
 
 DOCUMENT_RULES = (
     ("7.0.1", "SICAF", "BÁSICOS", ("sicaf",)),
-    ("7.0.2", "Proposta Comercial", "BÁSICOS", ("proposta",)),
+    (
+        "7.0.2",
+        "Proposta Comercial",
+        "BÁSICOS",
+        ("proposta", "realinhada"),
+    ),
     ("7.0.3", "Requerimento", "BÁSICOS", ("requerimento",)),
-    ("7.0.4", "Catálogo dos Itens Vencedores", "TÉCNICOS", ("catalogo", "catálogo")),
+    (
+        "7.0.4",
+        "Catálogo Itens Vencedores",
+        "TÉCNICOS",
+        (
+            "catalogo",
+            "catálogo",
+            "folder",
+            "prospecto",
+            "ficha tecnica",
+            "ficha técnica",
+            "_cat",
+        ),
+    ),
     (
         "7.1.1",
         "Contrato Social",
@@ -45,26 +81,64 @@ DOCUMENT_RULES = (
         "7.2.2",
         "Certidão Federal",
         "BÁSICOS",
-        ("certidao federal", "certidão federal", "receita federal"),
+        (
+            "certidao federal",
+            "certidão federal",
+            "receita federal",
+            "cnd federal",
+            "cnd unificada",
+        ),
     ),
     (
         "7.2.3",
         "Certidão Estadual",
         "BÁSICOS",
-        ("certidao estadual", "certidão estadual", "fazenda estadual"),
+        (
+            "certidao estadual",
+            "certidão estadual",
+            "fazenda estadual",
+            "cnd estadual",
+        ),
     ),
     (
         "7.2.4",
         "Certidão Municipal",
         "BÁSICOS",
-        ("certidao municipal", "certidão municipal", "fazenda municipal"),
+        (
+            "certidao municipal",
+            "certidão municipal",
+            "fazenda municipal",
+            "cnd municipal",
+        ),
     ),
-    ("7.2.5", "Certificado de Regularidade do FGTS", "BÁSICOS", ("fgts", "crf")),
+    (
+        "10.9",
+        "Certificado de Regularidade Técnica",
+        "TÉCNICOS",
+        (
+            "certificado de regularidade tecnica",
+            "certificado de regularidade técnica",
+            "certidao de regularidade tecnica",
+            "certidão de regularidade técnica",
+            "certificado regularidade tecnica",
+            "certificado regularidade técnica",
+            "crt empresa",
+            "crt audio",
+            "crf carteirinha",
+            "crf + carteirinha",
+        ),
+    ),
+    ("7.2.5", "FGTS", "BÁSICOS", ("fgts", "crf caixa", "regularidade do fgts")),
     (
         "7.2.6",
         "Certidão Negativa de Débitos Trabalhistas",
         "BÁSICOS",
-        ("cndt", "debitos trabalhistas", "débitos trabalhistas"),
+        (
+            "cndt",
+            "debitos trabalhistas",
+            "débitos trabalhistas",
+            "cnd trabalhista",
+        ),
     ),
     (
         "7.3.1",
@@ -74,21 +148,39 @@ DOCUMENT_RULES = (
     ),
     (
         "10.9.1",
+        "Alvará Sanitário",
+        "TÉCNICOS",
+        ("alvara sanitario", "alvará sanitário"),
+    ),
+    (
+        "10.9.1",
         "Licença Sanitária",
         "TÉCNICOS",
-        ("licenca sanitaria", "licença sanitária", "alvara sanitario", "alvará sanitário"),
+        ("licenca sanitaria", "licença sanitária", "licenca de funcionamento"),
     ),
     (
         "10.9.2",
         "AFE ANVISA",
         "TÉCNICOS",
-        ("afe anvisa", "autorizacao de funcionamento", "autorização de funcionamento"),
+        (
+            "afe anvisa",
+            "autorizacao de funcionamento",
+            "autorização de funcionamento",
+            "aut. c-e-c",
+            "aut c-e-c",
+        ),
     ),
     (
         "10.9.3",
         "Registro ANVISA",
         "TÉCNICOS",
-        ("registro anvisa", "registro do produto", "publicacao dou", "publicação dou"),
+        (
+            "registro anvisa",
+            "registro do produto",
+            "publicacao dou",
+            "publicação dou",
+            "_rms",
+        ),
     ),
     (
         "10.9.5",
@@ -101,6 +193,139 @@ DOCUMENT_RULES = (
         "Atestado de Capacidade Técnica",
         "TÉCNICOS",
         ("atestado", "capacidade tecnica", "capacidade técnica"),
+    ),
+)
+
+CONTENT_RULES = (
+    (
+        "7.0.1",
+        "SICAF",
+        "BÁSICOS",
+        (("sistema de cadastramento unificado de fornecedores",),),
+    ),
+    (
+        "7.0.2",
+        "Proposta Comercial",
+        "BÁSICOS",
+        (("proposta comercial",),),
+    ),
+    (
+        "7.0.3",
+        "Requerimento",
+        "BÁSICOS",
+        (("requerimento de participacao",),),
+    ),
+    (
+        "7.0.4",
+        "Catálogo Itens Vencedores",
+        "TÉCNICOS",
+        (("catalogo de produtos",), ("prospecto tecnico",)),
+    ),
+    (
+        "7.1.1",
+        "Contrato Social",
+        "BÁSICOS",
+        (("contrato social",), ("alteracao contratual",), ("ato constitutivo",)),
+    ),
+    (
+        "7.1.2",
+        "Procuração e Documento do Representante",
+        "BÁSICOS",
+        (("instrumento de procuracao",), ("outorgante", "outorgado")),
+    ),
+    (
+        "7.1.3",
+        "Autorização de Empresa Estrangeira",
+        "BÁSICOS",
+        (("decreto de autorizacao", "empresa estrangeira"),),
+    ),
+    (
+        "7.2.1",
+        "Comprovante de CNPJ",
+        "BÁSICOS",
+        (("comprovante de inscricao e de situacao cadastral",),),
+    ),
+    (
+        "7.2.2",
+        "Certidão Federal",
+        "BÁSICOS",
+        (
+            ("debitos relativos a creditos tributarios federais",),
+            ("divida ativa da uniao", "certidao"),
+        ),
+    ),
+    (
+        "7.2.3",
+        "Certidão Estadual",
+        "BÁSICOS",
+        (
+            ("certidao", "fazenda estadual"),
+            ("certidao", "secretaria de estado da fazenda"),
+        ),
+    ),
+    (
+        "7.2.4",
+        "Certidão Municipal",
+        "BÁSICOS",
+        (
+            ("certidao", "debitos municipais"),
+            ("certidao", "fazenda municipal"),
+            ("certidao mobiliaria",),
+        ),
+    ),
+    (
+        "7.2.5",
+        "FGTS",
+        "BÁSICOS",
+        (("certificado de regularidade do fgts",), ("regularidade do fgts", "caixa")),
+    ),
+    (
+        "7.2.6",
+        "Certidão Negativa de Débitos Trabalhistas",
+        "BÁSICOS",
+        (("certidao negativa de debitos trabalhistas",),),
+    ),
+    (
+        "7.3.1",
+        "Certidão de Falência",
+        "BÁSICOS",
+        (
+            ("certidao", "falencia"),
+            ("certidao", "recuperacao judicial"),
+        ),
+    ),
+    (
+        "10.9.1",
+        "Alvará Sanitário",
+        "TÉCNICOS",
+        (("alvara sanitario",),),
+    ),
+    (
+        "10.9.1",
+        "Licença Sanitária",
+        "TÉCNICOS",
+        (("licenca sanitaria",),),
+    ),
+    (
+        "10.9.2",
+        "AFE ANVISA",
+        "TÉCNICOS",
+        (("autorizacao de funcionamento", "anvisa"),),
+    ),
+    (
+        "10.9.3",
+        "Registro ANVISA",
+        "TÉCNICOS",
+        (("registro do produto", "anvisa"), ("registro anvisa",)),
+    ),
+    (
+        "10.9",
+        "Certificado de Regularidade Técnica",
+        "TÉCNICOS",
+        (
+            ("certificado de regularidade tecnica",),
+            ("certificado", "conselho regional", "responsavel tecnico"),
+        ),
     ),
 )
 
@@ -142,6 +367,20 @@ TECHNICAL_KEYWORDS = (
 )
 
 PROFILE_CHECKLISTS = {
+    "Padrão geral": (
+        ("SICAF", ("sicaf",)),
+        ("Proposta Comercial", ("proposta",)),
+        ("Requerimento", ("requerimento",)),
+        ("Catálogo dos itens vencedores", ("catalogo", "catálogo", "folder")),
+        ("Contrato Social", ("contrato social", "estatuto", "ato constitutivo")),
+        ("CNPJ", ("cnpj",)),
+        ("Certidão Federal", ("certidao federal", "certidão federal")),
+        ("Certidão Estadual", ("certidao estadual", "certidão estadual")),
+        ("Certidão Municipal", ("certidao municipal", "certidão municipal")),
+        ("FGTS", ("fgts",)),
+        ("CNDT", ("cndt",)),
+        ("Certidão de Falência", ("falencia", "falência")),
+    ),
     "Genérico": (
         ("CNPJ", ("cnpj",)),
         ("Ato constitutivo", ("contrato social", "estatuto")),
@@ -188,10 +427,37 @@ def classify_document(filename: str) -> str:
 
 
 def identify_document(filename: str, extracted_text: str = "") -> dict | None:
-    normalized = normalize_text(f"{filename} {extracted_text}")
+    normalized = normalize_text(filename)
     for code, label, category, keywords in DOCUMENT_RULES:
         if any(normalize_text(keyword) in normalized for keyword in keywords):
-            return {"code": code, "label": label, "category": category}
+            explicit_code = re.search(
+                rf"(?<!\d){re.escape(code)}(?!\d)",
+                filename,
+            )
+            confidence = 100 if explicit_code else 80
+            if "consolidada" in normalized or "consolidadas" in normalized:
+                confidence = min(confidence, 60)
+            return {
+                "code": code,
+                "label": label,
+                "category": category,
+                "confidence": confidence,
+                "identified_by": "nome do arquivo",
+            }
+
+    normalized_content = normalize_text(extracted_text)
+    for code, label, category, signatures in CONTENT_RULES:
+        if any(
+            all(normalize_text(term) in normalized_content for term in signature)
+            for signature in signatures
+        ):
+            return {
+                "code": code,
+                "label": label,
+                "category": category,
+                "confidence": 50,
+                "identified_by": "conteúdo do documento",
+            }
     return None
 
 
@@ -202,16 +468,159 @@ def _extract_searchable_text(filename: str, content: bytes) -> str:
             with pdfplumber.open(BytesIO(content)) as pdf:
                 return " ".join(
                     page.extract_text() or ""
-                    for page in pdf.pages[:MAX_TEXT_EXTRACTION_PAGES]
-                )[:30_000]
+                    for page in pdf.pages
+                )
         if suffix == ".docx":
             document = Document(BytesIO(content))
-            return " ".join(paragraph.text for paragraph in document.paragraphs)[
-                :30_000
-            ]
+            return " ".join(paragraph.text for paragraph in document.paragraphs)
     except Exception:
         return ""
     return ""
+
+
+def _parse_winners_report(reference_file: tuple[str, bytes] | None) -> list[dict]:
+    if not reference_file:
+        return []
+    filename, content = reference_file
+    if PurePosixPath(filename).suffix.casefold() != ".pdf":
+        return []
+    try:
+        reader = PdfReader(BytesIO(content))
+        text = "\n".join(page.extract_text() or "" for page in reader.pages)
+        return parse_vencedores_pdf_text(text)
+    except Exception:
+        return []
+
+
+def _supplier_key(value: str) -> str:
+    normalized = normalize_text(value)
+    normalized = re.sub(
+        r"\b(ltda|eireli|epp|me|sa|comercio|comercial|distribuidora)\b",
+        " ",
+        normalized,
+    )
+    return re.sub(r"[^a-z0-9]+", " ", normalized).strip()
+
+
+def _winner_for_supplier(supplier: str, winners: list[dict]) -> dict | None:
+    supplier_key = _supplier_key(supplier)
+    supplier_tokens = [token for token in supplier_key.split() if len(token) >= 3]
+    best_match = None
+    best_score = 0
+    for winner in winners:
+        winner_key = _supplier_key(winner.get("nome", ""))
+        winner_tokens = {token for token in winner_key.split() if len(token) >= 3}
+        score = sum(token in winner_tokens for token in supplier_tokens)
+        if (
+            supplier_key
+            and winner_key
+            and (supplier_key in winner_key or winner_key in supplier_key)
+        ):
+            score += 3
+        if score > best_score:
+            best_match = winner
+            best_score = score
+    return best_match if best_score >= 1 else None
+
+
+def _required_technical_documents(description: str) -> list[tuple[str, str]]:
+    normalized = normalize_text(description)
+    if not normalized:
+        return []
+    required = []
+    seen = set()
+    for code, label, category, keywords in DOCUMENT_RULES:
+        if category != "TÉCNICOS" or code == "7.0.4":
+            continue
+        keyword_match = any(
+            normalize_text(keyword) in normalized for keyword in keywords
+        )
+        if label == "AFE ANVISA" and re.search(r"\bafe\b", normalized):
+            keyword_match = True
+        if label == "Alvará Sanitário":
+            keyword_match = keyword_match or (
+                "alvara" in normalized and "sanitari" in normalized
+            )
+        if label == "Licença Sanitária":
+            keyword_match = keyword_match or (
+                "licenca" in normalized and "sanitari" in normalized
+            )
+        if keyword_match and (code, label) not in seen:
+            required.append((code, label))
+            seen.add((code, label))
+    return required
+
+
+def _filter_catalog_pdf(content: bytes, winner_items: list[dict]) -> tuple[bytes, int]:
+    if not winner_items:
+        return content, 0
+    try:
+        reader = PdfReader(BytesIO(content))
+        selected_pages = []
+        for page in reader.pages:
+            page_text = normalize_text(page.extract_text() or "")
+            page_selected = False
+            for item in winner_items:
+                item_number = str(item.get("item") or "").lstrip("0") or "0"
+                code = str(item.get("codigo") or "")
+                item_pattern = rf"\bitem\s*(?:n[ºo°.]?\s*)?0*{re.escape(item_number)}\b"
+                description = normalize_text(
+                    " ".join(
+                        str(item.get(field) or "")
+                        for field in ("descricao", "marca", "modelo")
+                    )
+                )
+                keywords = {
+                    word
+                    for word in re.findall(r"[a-z0-9]{5,}", description)
+                    if word
+                    not in {
+                        "marca",
+                        "modelo",
+                        "unidade",
+                        "produto",
+                        "quantidade",
+                    }
+                }
+                keyword_hits = sum(
+                    keyword in page_text for keyword in list(keywords)[:12]
+                )
+                if (
+                    re.search(item_pattern, page_text)
+                    or (code and re.search(rf"\b{re.escape(code)}\b", page_text))
+                    or keyword_hits >= 2
+                ):
+                    page_selected = True
+                    break
+            if page_selected:
+                selected_pages.append(page)
+
+        if not selected_pages:
+            return content, 0
+        writer = PdfWriter()
+        for page in selected_pages:
+            writer.add_page(page)
+        output = BytesIO()
+        writer.write(output)
+        return output.getvalue(), len(selected_pages)
+    except Exception:
+        return content, 0
+
+
+def _merge_pdf_documents(contents: list[bytes]) -> bytes:
+    if len(contents) == 1:
+        return contents[0]
+    writer = PdfWriter()
+    try:
+        for content in contents:
+            reader = PdfReader(BytesIO(content))
+            for page in reader.pages:
+                writer.add_page(page)
+        output = BytesIO()
+        writer.write(output)
+        return output.getvalue()
+    except Exception:
+        return contents[0]
 
 
 def _extract_all_zip_documents(
@@ -260,11 +669,94 @@ def _extract_all_zip_documents(
                 except ValueError as exc:
                     if "não é um ZIP válido" not in str(exc):
                         raise
+            if entry.filename.casefold().endswith(
+                (".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2")
+            ):
+                try:
+                    extracted.extend(
+                        _extract_all_tar_documents(
+                            payload,
+                            prefix=source,
+                            depth=depth + 1,
+                            limits=limits,
+                        )
+                    )
+                    continue
+                except tarfile.ReadError:
+                    pass
 
             limits["files"] += 1
             limits["bytes"] += len(payload)
             if limits["files"] > MAX_FILES:
                 raise ValueError(f"O ZIP excede o limite de {MAX_FILES} arquivos.")
+            if limits["bytes"] > MAX_UNCOMPRESSED_BYTES:
+                raise ValueError(
+                    "O conteúdo descompactado excede o limite de 300 MB."
+                )
+            extracted.append({"source": source, "content": payload})
+    return extracted
+
+
+def _extract_all_tar_documents(
+    content: bytes,
+    *,
+    prefix: str,
+    depth: int,
+    limits: dict,
+) -> list[dict]:
+    if depth > MAX_NESTED_ZIP_DEPTH:
+        raise ValueError(
+            f"O pacote contém mais de {MAX_NESTED_ZIP_DEPTH} níveis de arquivos."
+        )
+
+    extracted = []
+    with tarfile.open(fileobj=BytesIO(content), mode="r:*") as archive:
+        for member in archive.getmembers():
+            if not member.isfile():
+                continue
+            stream = archive.extractfile(member)
+            if stream is None:
+                continue
+            payload = stream.read()
+            source = f"{prefix}/{member.name}".strip("/")
+            lowered = member.name.casefold()
+
+            if lowered.endswith(".zip"):
+                try:
+                    extracted.extend(
+                        _extract_all_zip_documents(
+                            payload,
+                            prefix=source,
+                            depth=depth + 1,
+                            limits=limits,
+                        )
+                    )
+                    continue
+                except ValueError as exc:
+                    if "não é um ZIP válido" not in str(exc):
+                        raise
+            if lowered.endswith(
+                (".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2")
+            ):
+                try:
+                    extracted.extend(
+                        _extract_all_tar_documents(
+                            payload,
+                            prefix=source,
+                            depth=depth + 1,
+                            limits=limits,
+                        )
+                    )
+                    continue
+                except tarfile.ReadError:
+                    pass
+
+            limits["files"] += 1
+            limits["bytes"] += len(payload)
+            if limits["files"] > MAX_FILES:
+                raise ValueError(
+                    f"O pacote excede o limite de {MAX_FILES} arquivos."
+                )
             if limits["bytes"] > MAX_UNCOMPRESSED_BYTES:
                 raise ValueError(
                     "O conteúdo descompactado excede o limite de 300 MB."
@@ -279,17 +771,58 @@ def _safe_basename(name: str) -> str:
     return cleaned or "documento_sem_nome"
 
 
-def _supplier_from_source(source: str) -> str:
+def supplier_label_from_package(filename: str) -> str:
+    digits = re.sub(r"\D", "", PurePosixPath(filename).stem)
+    if len(digits) >= 14:
+        cnpj = digits[-14:]
+        return (
+            f"Fornecedor - {cnpj[:2]}.{cnpj[2:5]}.{cnpj[5:8]}/"
+            f"{cnpj[8:12]}-{cnpj[12:]}"
+        )
+    cleaned = re.sub(
+        r"(?i)^documentos?fornecedor(?:nalicitacao)?[-_ ]*",
+        "",
+        PurePosixPath(filename).stem,
+    ).strip(" -_")
+    return cleaned or "FORNECEDOR_NAO_IDENTIFICADO"
+
+
+def _supplier_from_source(
+    source: str,
+    winners: list[dict] | None = None,
+    default_supplier: str = "",
+) -> str:
     parts = [
         part
         for part in source.replace("\\", "/").split("/")
         if part and part not in {".", ".."}
     ]
     if len(parts) < 2:
-        return "FORNECEDOR_NAO_IDENTIFICADO"
+        return default_supplier or "FORNECEDOR_NAO_IDENTIFICADO"
+    if winners:
+        for part in parts[:-1]:
+            winner = _winner_for_supplier(PurePosixPath(part).stem, winners)
+            if winner:
+                return re.sub(
+                    r'[<>:"/\\|?*\x00-\x1f]',
+                    "_",
+                    winner.get("nome", PurePosixPath(part).stem),
+                ).strip(" .")
+    first_stem = PurePosixPath(parts[0]).stem
+    generic_container = normalize_text(first_stem) in {
+        "habilitacao",
+        "documentos",
+        "rms e cat",
+        "rms cat",
+        "arquivos",
+        "anexos",
+    }
+    if default_supplier and generic_container:
+        return default_supplier
     supplier_part = (
-        PurePosixPath(parts[0]).stem
-        if PurePosixPath(parts[0]).suffix.casefold() == ".zip"
+        first_stem
+        if PurePosixPath(parts[0]).suffix.casefold()
+        in {".zip", ".tar", ".tgz", ".gz", ".bz2"}
         else parts[0]
     )
     cleaned = re.sub(
@@ -304,31 +837,60 @@ def analyze_document_zip(
     content: bytes,
     profile: str,
     technical_qualification: str = "",
+    reference_file: tuple[str, bytes] | None = None,
+    default_supplier: str = "",
 ) -> dict:
     if profile not in PROFILE_CHECKLISTS:
         raise ValueError(f"Perfil documental inválido: {profile}")
 
     entries = _extract_all_zip_documents(content)
+    winners = _parse_winners_report(reference_file)
     documents = []
     for entry in entries:
         filename = _safe_basename(entry["source"])
         suffix = PurePosixPath(filename).suffix.casefold()
         searchable_text = _extract_searchable_text(filename, entry["content"])
         identification = identify_document(filename, searchable_text)
+        supplier = _supplier_from_source(
+            entry["source"],
+            winners,
+            default_supplier,
+        )
+        winner = _winner_for_supplier(supplier, winners)
         standardized_name = (
-            f"{identification['code']} {identification['label']}{suffix}"
+            f"{identification['code']} - {identification['label']}{suffix}"
             if identification
             else filename
         )
+        if identification and identification["code"] == "10.9.3":
+            normalized_filename = normalize_text(filename)
+            item_match = re.search(
+                r"lote[\s_\-\[\]]*0*(\d{1,4})",
+                normalized_filename,
+            ) or re.search(
+                r"item[\s_\-\[\]]*0*(\d{1,4})",
+                normalized_filename,
+            )
+            if item_match:
+                standardized_name = (
+                    f"10.9.3 - Registro ANVISA - Item "
+                    f"{int(item_match.group(1))}{suffix}"
+                )
         documents.append(
             {
                 "source": entry["source"],
-                "supplier": _supplier_from_source(entry["source"]),
+                "supplier": supplier,
                 "name": filename,
                 "standardized_name": standardized_name,
                 "identified": identification is not None,
                 "document_code": identification["code"] if identification else "",
                 "document_label": identification["label"] if identification else "",
+                "identification_confidence": (
+                    identification["confidence"] if identification else 0
+                ),
+                "identified_by": (
+                    identification["identified_by"] if identification else ""
+                ),
                 "category": (
                     identification["category"]
                     if identification
@@ -338,8 +900,49 @@ def analyze_document_zip(
                 "size": len(entry["content"]),
                 "ocr_candidate": suffix
                 in {".png", ".jpg", ".jpeg", ".tif", ".tiff"},
+                "winner_items": winner.get("itens", []) if winner else [],
             }
         )
+
+    required_technical = set(
+        _required_technical_documents(technical_qualification)
+    )
+    required_groups: dict[tuple[str, str, str], list[dict]] = {}
+    for document in documents:
+        if not document["identified"]:
+            document["selected_for_requirement"] = False
+            continue
+        requirement = (document["document_code"], document["document_label"])
+        is_required = (
+            document["document_code"] in STANDARD_REQUIRED_CODES
+            or document["document_code"] in CONDITIONAL_DOCUMENT_CODES
+            or requirement in required_technical
+        )
+        document["selected_for_requirement"] = False
+        if is_required:
+            key = (
+                document["supplier"],
+                document["document_code"],
+                document["document_label"],
+            )
+            required_groups.setdefault(key, []).append(document)
+
+    for candidates in required_groups.values():
+        best_confidence = max(
+            document["identification_confidence"] for document in candidates
+        )
+        best_candidates = [
+            document
+            for document in candidates
+            if document["identification_confidence"] == best_confidence
+        ]
+        code = candidates[0]["document_code"]
+        if code in MULTIPLE_DOCUMENT_CODES or code == "7.0.4":
+            selected = best_candidates
+        else:
+            selected = [max(best_candidates, key=lambda document: document["size"])]
+        for document in selected:
+            document["selected_for_requirement"] = True
 
     all_names = " ".join(document["name"] for document in documents)
     normalized_names = normalize_text(all_names)
@@ -358,6 +961,7 @@ def analyze_document_zip(
         "technical_qualification": technical_qualification.strip(),
         "documents": documents,
         "suppliers": suppliers,
+        "winners_identified": len(winners),
         "checklist": checklist,
         "totals": totals,
         "ocr_candidates": sum(document["ocr_candidate"] for document in documents),
@@ -377,18 +981,37 @@ def build_organized_zip(
 
     with ZipFile(output_buffer, "w", ZIP_DEFLATED) as target:
         output_names: dict[str, int] = {}
+        catalog_groups: dict[str, list[bytes]] = {}
         for entry in extracted_entries:
             if entry["source"] not in document_map:
                 continue
             document = document_map[entry["source"]]
-            if document["identified"]:
+            payload = entry["content"]
+            if (
+                document["selected_for_requirement"]
+                and document["document_code"] == "7.0.4"
+            ):
+                payload, selected_pages = _filter_catalog_pdf(
+                    payload,
+                    document.get("winner_items", []),
+                )
+                document["catalog_pages_selected"] = selected_pages
+                catalog_groups.setdefault(document["supplier"], []).append(payload)
+                continue
+
+            if document["selected_for_requirement"]:
                 folder = (
                     f"{document['supplier']}/01 - Documentos Exigidos"
                 )
                 desired_name = document["standardized_name"]
+            elif document["identified"]:
+                folder = (
+                    f"{document['supplier']}/02 - Documentos Não Utilizados"
+                )
+                desired_name = document["name"]
             else:
                 folder = (
-                    f"{document['supplier']}/02 - Documentos Não Identificados"
+                    f"{document['supplier']}/03 - Documentos Não Identificados"
                 )
                 desired_name = document["name"]
 
@@ -401,7 +1024,16 @@ def build_organized_zip(
 
             target.writestr(
                 f"{folder}/{desired_name}",
-                entry["content"],
+                payload,
+            )
+
+        for supplier, catalog_contents in catalog_groups.items():
+            target.writestr(
+                (
+                    f"{supplier}/01 - Documentos Exigidos/"
+                    "7.0.4 - Catálogo Itens Vencedores.pdf"
+                ),
+                _merge_pdf_documents(catalog_contents),
             )
 
         report = StringIO()
@@ -412,6 +1044,9 @@ def build_organized_zip(
                 "arquivo_renomeado",
                 "fornecedor",
                 "identificado",
+                "utilizado",
+                "identificado_por",
+                "confianca",
                 "codigo",
                 "categoria",
                 "extensao",
@@ -426,6 +1061,9 @@ def build_organized_zip(
                     document["standardized_name"],
                     document["supplier"],
                     "sim" if document["identified"] else "não",
+                    "sim" if document["selected_for_requirement"] else "não",
+                    document["identified_by"],
+                    document["identification_confidence"],
                     document["document_code"],
                     document["category"],
                     document["extension"],
@@ -472,8 +1110,16 @@ def build_organized_zip(
             located_codes = {
                 document["document_code"]
                 for document in supplier_documents
-                if document["identified"]
+                if document["selected_for_requirement"]
             }
+            located_code_labels = {
+                (document["document_code"], document["document_label"])
+                for document in supplier_documents
+                if document["selected_for_requirement"]
+            }
+            required_technical = _required_technical_documents(
+                analysis.get("technical_qualification", "")
+            )
             supplier_lines = [
                 f"Fornecedor: {supplier}",
                 f"Perfil documental: {analysis['profile']}",
@@ -485,15 +1131,15 @@ def build_organized_zip(
                 *[
                     f"[OK] {document['document_code']} - {document['document_label']}"
                     for document in supplier_documents
-                    if document["identified"]
+                    if document["selected_for_requirement"]
                 ],
                 "",
-                "DOCUMENTOS BÁSICOS NÃO LOCALIZADOS:",
+                "DOCUMENTOS PADRÃO NÃO LOCALIZADOS:",
                 *[
                     f"[  ] {code} - {label}"
                     for code, label, category, _ in DOCUMENT_RULES
                     if (
-                        category == "BÁSICOS"
+                        code in STANDARD_REQUIRED_CODES
                         and code not in located_codes
                         and code not in CONDITIONAL_DOCUMENT_CODES
                     )
@@ -505,6 +1151,16 @@ def build_organized_zip(
                     for code, label, _, _ in DOCUMENT_RULES
                     if code in CONDITIONAL_DOCUMENT_CODES
                 ],
+                "",
+                "QUALIFICAÇÃO TÉCNICA NÃO LOCALIZADA:",
+                *(
+                    [
+                        f"[  ] {code} - {label}"
+                        for code, label in required_technical
+                        if (code, label) not in located_code_labels
+                    ]
+                    or ["Nenhuma pendência técnica identificada."]
+                ),
             ]
             target.writestr(
                 f"{supplier}/RELATÓRIO DE CONFERÊNCIA.txt",
