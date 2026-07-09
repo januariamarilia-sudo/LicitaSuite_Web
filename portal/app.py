@@ -671,9 +671,90 @@ def render_foco_docs() -> None:
             f"OCR aplicado em {analysis['ocr_processed']} documento(s) escaneado(s)."
         )
 
-    tab_checklist, tab_documents = st.tabs(["Checklist", "Documentos"])
+    tab_checklist, tab_validation, tab_documents = st.tabs(
+        ["Checklist", "Conferência / validação", "Documentos"]
+    )
     with tab_checklist:
         st.dataframe(analysis["checklist"], use_container_width=True, hide_index=True)
+    with tab_validation:
+        validation_codes = {
+            "7.0.1",
+            "7.2.1",
+            "7.2.2",
+            "7.2.3",
+            "7.2.4",
+            "7.2.5",
+            "7.2.6",
+            "7.3.1",
+        }
+        validation_rows = [
+            {
+                "Fornecedor": document["supplier"],
+                "Documento": document["standardized_name"],
+                "Grupo": document["document_group"],
+                "Validade": document["validity_date"] or "-",
+                "Situação": document["validity_status"],
+                "Validar no site oficial": document["validation_url"] or None,
+                "Orientação": document["validation_note"],
+            }
+            for document in analysis["documents"]
+            if document["selected_for_requirement"]
+            and document["document_code"] in validation_codes
+        ]
+        if not validation_rows:
+            st.info(
+                "Nenhum documento obrigatório de validação foi localizado "
+                "neste pacote."
+            )
+        else:
+            valid_count = sum(row["Situação"] == "Válido" for row in validation_rows)
+            expired_count = sum(row["Situação"] == "Vencido" for row in validation_rows)
+            pending_count = sum(
+                row["Situação"] == "Não identificada" for row in validation_rows
+            )
+            col_valid, col_expired, col_pending = st.columns(3)
+            col_valid.metric("Válidos", valid_count)
+            col_expired.metric("Vencidos", expired_count)
+            col_pending.metric("Sem validade lida", pending_count)
+            st.caption(
+                "Use esta aba para conferir SICAF, CNPJ, Federal, Estadual, "
+                "Municipal, FGTS, Trabalhista e Falência."
+            )
+            st.dataframe(
+                validation_rows,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Validar no site oficial": st.column_config.LinkColumn(
+                        "Validar",
+                        help="Abre o portal oficial ou o endereço localizado no documento.",
+                        display_text="Abrir site oficial",
+                    ),
+                },
+            )
+            validation_report = "\n".join(
+                [
+                    "ROTEIRO DE CONFERÊNCIA E VALIDAÇÃO",
+                    "",
+                    *[
+                        (
+                            f"{row['Fornecedor']} | {row['Documento']} | "
+                            f"Validade: {row['Validade']} | "
+                            f"Situação: {row['Situação']} | "
+                            f"Validação: "
+                            f"{row['Validar no site oficial'] or row['Orientação']}"
+                        )
+                        for row in validation_rows
+                    ],
+                ]
+            )
+            st.download_button(
+                "Baixar roteiro de validação",
+                data=validation_report.encode("utf-8"),
+                file_name="ROTEIRO_DE_VALIDACAO_DOCUMENTAL.txt",
+                mime="text/plain",
+                use_container_width=True,
+            )
     with tab_documents:
         all_print_rows = [
             {
