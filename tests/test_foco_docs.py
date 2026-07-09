@@ -8,6 +8,7 @@ from portal.foco_docs import (
     analyze_document_zip,
     build_organized_zip,
     build_print_pdf,
+    document_validation,
 )
 
 
@@ -172,3 +173,13 @@ def test_foco_docs_builds_one_pdf_from_selected_documents():
     assert document_count == 2
     assert page_count == 2
     assert len(PdfReader(BytesIO(print_pdf)).pages) == 2
+
+
+def test_foco_docs_uses_official_regional_validation_url_from_document():
+    url, note = document_validation(
+        "7.2.3",
+        "Valide esta certidão em https://www.fazenda.mg.gov.br/validar",
+    )
+
+    assert url == "https://www.fazenda.mg.gov.br/validar"
+    assert "localizado no documento" in note

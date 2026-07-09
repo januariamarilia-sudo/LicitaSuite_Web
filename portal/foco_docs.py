@@ -478,7 +478,30 @@ def document_group(code: str) -> str:
     return "Outros documentos"
 
 
-def document_validation(code: str) -> tuple[str, str]:
+def _official_url_from_document(text: str) -> str:
+    candidates = re.findall(
+        r"(?i)\b(?:https?://|www\.)[^\s<>{}\[\]\"']+",
+        text or "",
+    )
+    for candidate in candidates:
+        url = candidate.rstrip(".,;:)")
+        if url.casefold().startswith("www."):
+            url = f"https://{url}"
+        lowered = url.casefold()
+        if any(
+            official_domain in lowered
+            for official_domain in (
+                ".gov.br",
+                ".jus.br",
+                "caixa.gov.br",
+                "tst.jus.br",
+            )
+        ):
+            return url
+    return ""
+
+
+def document_validation(code: str, document_text: str = "") -> tuple[str, str]:
     official_links = {
         "7.0.1": (
             "https://www.gov.br/compras/pt-br/sicaf-digital",
@@ -518,6 +541,14 @@ def document_validation(code: str) -> tuple[str, str]:
         "10.9.1": "Validar na Vigilância Sanitária estadual ou municipal emissora.",
         "10.9": "Validar no conselho profissional que emitiu o certificado.",
     }
+    regional_codes = {"7.2.3", "7.2.4", "7.3.1", "10.9.1", "10.9"}
+    if code in regional_codes:
+        extracted_url = _official_url_from_document(document_text)
+        if extracted_url:
+            return (
+                extracted_url,
+                "Endereço oficial de autenticação localizado no documento.",
+            )
     if code in official_links:
         return official_links[code]
     return "", regional_notes.get(
@@ -1191,7 +1222,8 @@ def analyze_document_zip(
         identification = identify_document(filename, searchable_text)
         validity = _detect_validity(filename, searchable_text)
         validation_url, validation_note = document_validation(
-            identification["code"] if identification else ""
+            identification["code"] if identification else "",
+            searchable_text,
         )
         supplier = _supplier_from_source(
             entry["source"],
