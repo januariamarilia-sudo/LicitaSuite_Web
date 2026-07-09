@@ -166,6 +166,26 @@ def test_foco_docs_flags_expired_validity_from_filename():
     assert document["validity_status"] == "Vencido"
 
 
+def test_foco_docs_uses_session_date_for_validity():
+    buffer = BytesIO()
+    with ZipFile(buffer, "w") as archive:
+        archive.writestr(
+            "FORNECEDOR/CNPJ - VAL. 10-01-2026.pdf",
+            b"documento",
+        )
+
+    analysis = analyze_document_zip(
+        buffer.getvalue(),
+        "Padrão geral",
+        session_date="2026-01-05",
+    )
+    document = analysis["documents"][0]
+
+    assert analysis["session_date"] == "05/01/2026"
+    assert document["validity_date"] == "10/01/2026"
+    assert document["validity_status"] == "Vence em até 30 dias"
+
+
 def test_foco_docs_builds_one_pdf_from_selected_documents():
     pdf_buffer = BytesIO()
     writer = PdfWriter()

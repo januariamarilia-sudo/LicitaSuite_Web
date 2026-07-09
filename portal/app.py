@@ -572,6 +572,16 @@ def render_foco_docs() -> None:
         "10.6, 10.7 e 10.8. "
         "Qualificação técnica 10.9: somente quando informada acima."
     )
+    session_date = st.date_input(
+        "Data da sessão (opcional)",
+        value=None,
+        format="DD/MM/YYYY",
+        help=(
+            "Se preenchida, a validade das certidões será conferida usando "
+            "esta data como referência da sessão."
+        ),
+        key="foco_docs_session_date",
+    )
     fast_mode = st.checkbox(
         "Modo rápido: localizar e renomear somente documentos exigidos",
         value=True,
@@ -633,6 +643,7 @@ def render_foco_docs() -> None:
                 uploaded_zip.name,
                 fast_mode=fast_mode,
                 allow_ocr=allow_ocr,
+                session_date=session_date,
             )
             progress.progress(
                 70,
@@ -687,6 +698,11 @@ def render_foco_docs() -> None:
     st.caption(
         f"{len(analysis.get('suppliers', []))} fornecedor(es) localizado(s) no pacote."
     )
+    if analysis.get("session_date"):
+        st.info(
+            f"Validade dos documentos conferida com base na data da sessão: "
+            f"{analysis['session_date']}."
+        )
 
     if analysis["ocr_candidates"] and not analysis.get("ocr_processed"):
         st.warning(

@@ -777,7 +777,12 @@ def _extract_searchable_text(
     return "", False
 
 
-def _detect_validity(filename: str, text: str) -> dict:
+def _detect_validity(
+    filename: str,
+    text: str,
+    *,
+    reference_date: date | None = None,
+) -> dict:
     source = f"{filename}\n{text}"
     patterns = (
         r"(?i)(?:validade|v[aá]lid[ao]\s+at[eé]|vencimento|val\.?)"
@@ -800,7 +805,8 @@ def _detect_validity(filename: str, text: str) -> dict:
     if not parsed:
         return {"validity_date": "", "validity_status": "Não identificada"}
     validity = max(parsed)
-    days = (validity - date.today()).days
+    reference = reference_date or date.today()
+    days = (validity - reference).days
     if days < 0:
         status = "Vencido"
     elif days <= 30:
@@ -1654,6 +1660,19 @@ def _format_cnpj(cnpj: str) -> str:
     )
 
 
+def _coerce_date(value: date | str | None) -> date | None:
+    if isinstance(value, date):
+        return value
+    if not value:
+        return None
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d/%m/%y"):
+        try:
+            return datetime.strptime(str(value), fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
 def tcu_validation_url(cnpj_or_supplier: str = "") -> str:
     cnpj = _extract_cnpj(cnpj_or_supplier)
     if not cnpj:
@@ -1761,6 +1780,7 @@ def analyze_document_zip(
     *,
     fast_mode: bool = True,
     allow_ocr: bool = False,
+    session_date: date | str | None = None,
 ) -> dict:
     if profile not in PROFILE_CHECKLISTS:
         raise ValueError(f"Perfil documental inválido: {profile}")
@@ -1772,6 +1792,7 @@ def analyze_document_zip(
         split_only_likely_documents=fast_mode,
     )
     winners = _parse_winners_report(reference_file)
+    session_reference_date = _coerce_date(session_date)
     documents = []
     for entry in entries:
         filename = _safe_basename(entry["source"])
@@ -1785,7 +1806,11 @@ def analyze_document_zip(
             _identification_from_split_filename(filename)
             or identify_document(filename, searchable_text)
         )
-        validity = _detect_validity(filename, searchable_text)
+        validity = _detect_validity(
+            filename,
+            searchable_text,
+            reference_date=session_reference_date,
+        )
         validation_url, validation_note = document_validation(
             identification["code"] if identification else "",
             searchable_text,
@@ -1934,6 +1959,11 @@ def analyze_document_zip(
         "package_name": package_name,
         "fast_mode": fast_mode,
         "allow_ocr": allow_ocr,
+        "session_date": (
+            session_reference_date.strftime("%d/%m/%Y")
+            if session_reference_date
+            else ""
+        ),
     }
 
 
@@ -2128,6 +2158,11 @@ def build_organized_zip(
 
         checklist_lines = [
             f"Perfil documental: {analysis['profile']}",
+            (
+                f"Data da sessão usada para validade: {analysis['session_date']}"
+                if analysis.get("session_date")
+                else "Data da sessão usada para validade: data atual do processamento"
+            ),
             "",
             "QUALIFICAÇÃO TÉCNICA EXIGIDA:",
             analysis.get("technical_qualification")
@@ -2213,6 +2248,11 @@ def build_organized_zip(
                 f"Fornecedor: {supplier}",
                 f"CNPJ: {formatted_cnpj}",
                 f"Perfil documental: {analysis['profile']}",
+                (
+                    f"Data da sessão usada para validade: {analysis['session_date']}"
+                    if analysis.get("session_date")
+                    else "Data da sessão usada para validade: data atual do processamento"
+                ),
                 "",
                 "ORDEM DA PASTA:",
                 "01 - Documento do Processo",
