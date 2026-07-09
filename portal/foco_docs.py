@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from io import BytesIO, StringIO
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 import csv
 from datetime import date, datetime
+import shutil
+import subprocess
 import re
 import tarfile
+import tempfile
 import unicodedata
 from zipfile import ZIP_DEFLATED, BadZipFile, ZipFile
 
@@ -16,6 +19,7 @@ from pypdf import PdfReader, PdfWriter
 from licitasuite.parsers.vencedores_pdf_robusto import parse_vencedores_pdf_text
 
 
+TCU_CERTIDOES_URL = "https://certidoes-apf.apps.tcu.gov.br/"
 MAX_FILES = 2_000
 MAX_UNCOMPRESSED_BYTES = 300 * 1024 * 1024
 MAX_NESTED_ZIP_DEPTH = 4
@@ -68,13 +72,13 @@ DOCUMENT_RULES = (
         "10.6.1",
         "Ato Constitutivo e Contrato Social",
         "BÁSICOS",
-        ("contrato social", "estatuto", "ato constitutivo"),
+        ("contrato social", "estatuto", "ato constitutivo", "alteracao contratual", "alterao contratual"),
     ),
     (
         "10.6.2",
         "Procuração e Documento do Representante",
         "BÁSICOS",
-        ("procuracao", "procuração", "representante", "rg cpf"),
+        ("procuracao", "procuração", "procurao", "representante", "rg cpf"),
     ),
     (
         "10.6.3",
@@ -89,7 +93,6 @@ DOCUMENT_RULES = (
         (
             "certidao simplificada",
             "certidão simplificada",
-            "junta comercial",
             "me epp",
             "microempresa",
             "empresa de pequeno porte",
@@ -187,6 +190,7 @@ DOCUMENT_RULES = (
             "autorização de funcionamento",
             "aut. c-e-c",
             "aut c-e-c",
+            "ae anvisa",
         ),
     ),
     (
@@ -248,13 +252,23 @@ CONTENT_RULES = (
         "10.6.1",
         "Ato Constitutivo e Contrato Social",
         "BÁSICOS",
-        (("contrato social",), ("alteracao contratual",), ("ato constitutivo",)),
+        (
+            ("contrato social",),
+            ("alteracao contratual",),
+            ("alterao contratual",),
+            ("ato constitutivo",),
+        ),
     ),
     (
         "10.6.2",
         "Procuração e Documento do Representante",
         "BÁSICOS",
-        (("instrumento de procuracao",), ("outorgante", "outorgado")),
+        (
+            ("instrumento de procuracao",),
+            ("instrumento particular de procura",),
+            ("procurao",),
+            ("outorgante", "outorgado"),
+        ),
     ),
     (
         "10.6.3",
@@ -268,8 +282,6 @@ CONTENT_RULES = (
         "BÁSICOS",
         (
             ("certidao simplificada",),
-            ("junta comercial", "microempresa"),
-            ("junta comercial", "empresa de pequeno porte"),
         ),
     ),
     (
@@ -343,7 +355,10 @@ CONTENT_RULES = (
         "10.9.2",
         "AFE ANVISA",
         "TÉCNICOS",
-        (("autorizacao de funcionamento", "anvisa"),),
+        (
+            ("autorizacao de funcionamento", "anvisa"),
+            ("autorizao de funcionamento", "anvisa"),
+        ),
     ),
     (
         "10.9.3",
@@ -461,8 +476,33 @@ def classify_document(filename: str) -> str:
 
 def identify_document(filename: str, extracted_text: str = "") -> dict | None:
     normalized = normalize_text(filename)
+    skip_contract_from_content = (
+        "alvara" in normalized
+        and ("local" in normalized or "func" in normalized)
+        and "sanitari" not in normalized
+    )
     for code, label, category, keywords in DOCUMENT_RULES:
-        if any(normalize_text(keyword) in normalized for keyword in keywords):
+        keyword_match = any(
+            normalize_text(keyword).strip() in normalized for keyword in keywords
+        )
+        if label == "AFE ANVISA":
+            keyword_match = keyword_match or (
+                re.search(r"\b(?:afe|ae)\b", normalized) is not None
+                and (
+                    "anvisa" in normalized
+                    or "dou" in normalized
+                    or "autorizacao" in normalized
+                    or "autorizao" in normalized
+                )
+            )
+        if label == "Registro ANVISA":
+            keyword_match = keyword_match or (
+                re.search(r"\bregistro\b", normalized) is not None
+                and "registro cadastral" not in normalized
+                and "contrato" not in normalized
+                and "junta comercial" not in normalized
+            )
+        if keyword_match:
             explicit_code = re.search(
                 rf"(?<!\d){re.escape(code)}(?!\d)",
                 filename,
@@ -480,6 +520,8 @@ def identify_document(filename: str, extracted_text: str = "") -> dict | None:
 
     normalized_content = normalize_text(extracted_text)
     for code, label, category, signatures in CONTENT_RULES:
+        if skip_contract_from_content and code == "10.6.1":
+            continue
         if any(
             all(normalize_text(term) in normalized_content for term in signature)
             for signature in signatures
@@ -492,6 +534,52 @@ def identify_document(filename: str, extracted_text: str = "") -> dict | None:
                 "identified_by": "conteúdo do documento",
             }
     return None
+
+
+def _identify_document_by_content(extracted_text: str) -> dict | None:
+    normalized_content = normalize_text(extracted_text)
+    if not normalized_content:
+        return None
+    for code, label, category, signatures in CONTENT_RULES:
+        if any(
+            all(normalize_text(term) in normalized_content for term in signature)
+            for signature in signatures
+        ):
+            return {
+                "code": code,
+                "label": label,
+                "category": category,
+                "confidence": 50,
+                "identified_by": "conteúdo da página",
+            }
+    return None
+
+
+def _identification_from_split_filename(filename: str) -> dict | None:
+    match = re.search(
+        r" - páginas? .+? - (?P<code>\d+(?:\.\d+)*) - (?P<label>.+)\.pdf$",
+        filename,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return None
+    code = match.group("code")
+    label = match.group("label").strip()
+    category = next(
+        (
+            rule_category
+            for rule_code, _, rule_category, _ in DOCUMENT_RULES
+            if rule_code == code
+        ),
+        "BÁSICOS",
+    )
+    return {
+        "code": code,
+        "label": label,
+        "category": category,
+        "confidence": 90,
+        "identified_by": "páginas separadas do PDF",
+    }
 
 
 def document_group(code: str) -> str:
@@ -1055,11 +1143,14 @@ def _extract_all_zip_documents(
                             payload,
                             prefix=source,
                             limits=limits,
+                            depth=depth + 1,
                         )
                     )
                     continue
-                except Exception:
-                    pass
+                except Exception as exc:
+                    raise ValueError(
+                        f"Não foi possível abrir o RAR interno: {source}."
+                    ) from exc
 
             limits["files"] += 1
             limits["bytes"] += len(payload)
@@ -1133,11 +1224,14 @@ def _extract_all_tar_documents(
                             payload,
                             prefix=source,
                             limits=limits,
+                            depth=depth + 1,
                         )
                     )
                     continue
-                except Exception:
-                    pass
+                except Exception as exc:
+                    raise ValueError(
+                        f"Não foi possível abrir o RAR interno: {source}."
+                    ) from exc
 
             limits["files"] += 1
             limits["bytes"] += len(payload)
@@ -1158,30 +1252,179 @@ def _extract_all_rar_documents(
     *,
     prefix: str,
     limits: dict,
+    depth: int,
+) -> list[dict]:
+    if depth > MAX_NESTED_ZIP_DEPTH:
+        raise ValueError(
+            f"O pacote contém mais de {MAX_NESTED_ZIP_DEPTH} níveis de arquivos."
+        )
+    try:
+        return _extract_rar_with_rarfile(
+            content,
+            prefix=prefix,
+            limits=limits,
+            depth=depth,
+        )
+    except Exception:
+        return _extract_rar_with_external_tool(
+            content,
+            prefix=prefix,
+            limits=limits,
+            depth=depth,
+        )
+
+
+def _extract_nested_payload(
+    *,
+    payload: bytes,
+    source: str,
+    lowered: str,
+    limits: dict,
+    depth: int,
+) -> list[dict] | None:
+    if lowered.endswith(".zip"):
+        return _extract_all_zip_documents(
+            payload,
+            prefix=source,
+            depth=depth + 1,
+            limits=limits,
+        )
+    if lowered.endswith((".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2")):
+        return _extract_all_tar_documents(
+            payload,
+            prefix=source,
+            depth=depth + 1,
+            limits=limits,
+        )
+    if lowered.endswith(".rar"):
+        return _extract_all_rar_documents(
+            payload,
+            prefix=source,
+            limits=limits,
+            depth=depth + 1,
+        )
+    return None
+
+
+def _register_extracted_file(
+    extracted: list[dict],
+    *,
+    source: str,
+    payload: bytes,
+    limits: dict,
+) -> None:
+    limits["files"] += 1
+    limits["bytes"] += len(payload)
+    if limits["files"] > MAX_FILES:
+        raise ValueError(f"O pacote excede o limite de {MAX_FILES} arquivos.")
+    if limits["bytes"] > MAX_UNCOMPRESSED_BYTES:
+        raise ValueError("O conteúdo descompactado excede o limite de 300 MB.")
+    extracted.append({"source": source, "content": payload})
+
+
+def _extract_rar_with_rarfile(
+    content: bytes,
+    *,
+    prefix: str,
+    limits: dict,
+    depth: int,
 ) -> list[dict]:
     import rarfile
 
     extracted = []
-    with rarfile.RarFile(BytesIO(content)) as archive:
-        for info in archive.infolist():
-            if info.isdir():
+    with tempfile.NamedTemporaryFile(suffix=".rar", delete=False) as temp_file:
+        temp_file.write(content)
+        temp_path = temp_file.name
+    try:
+        with rarfile.RarFile(temp_path) as archive:
+            for info in archive.infolist():
+                if info.isdir():
+                    continue
+                payload = archive.read(info)
+                source = f"{prefix}/{info.filename}".strip("/")
+                nested = _extract_nested_payload(
+                    payload=payload,
+                    source=source,
+                    lowered=info.filename.casefold(),
+                    limits=limits,
+                    depth=depth,
+                )
+                if nested is not None:
+                    extracted.extend(nested)
+                    continue
+                _register_extracted_file(
+                    extracted,
+                    source=source,
+                    payload=payload,
+                    limits=limits,
+                )
+    finally:
+        Path(temp_path).unlink(missing_ok=True)
+    return extracted
+
+
+def _extract_rar_with_external_tool(
+    content: bytes,
+    *,
+    prefix: str,
+    limits: dict,
+    depth: int,
+) -> list[dict]:
+    tool = shutil.which("unar") or shutil.which("bsdtar")
+    if not tool:
+        raise ValueError(
+            "Não foi possível abrir arquivo RAR. O ambiente precisa do unar "
+            "ou bsdtar instalado."
+        )
+    extracted = []
+    with tempfile.TemporaryDirectory() as temp_dir:
+        rar_path = Path(temp_dir) / "arquivo.rar"
+        output_dir = Path(temp_dir) / "saida"
+        output_dir.mkdir()
+        rar_path.write_bytes(content)
+        if Path(tool).name.casefold().startswith("unar"):
+            command = [
+                tool,
+                "-quiet",
+                "-force-overwrite",
+                "-output-directory",
+                str(output_dir),
+                str(rar_path),
+            ]
+        else:
+            command = [tool, "-xf", str(rar_path), "-C", str(output_dir)]
+        completed = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+        if completed.returncode != 0:
+            raise ValueError(
+                "Não foi possível abrir o RAR. Verifique se o arquivo está íntegro."
+            )
+        for path in sorted(output_dir.rglob("*")):
+            if not path.is_file():
                 continue
-            payload = archive.read(info)
-            limits["files"] += 1
-            limits["bytes"] += len(payload)
-            if limits["files"] > MAX_FILES:
-                raise ValueError(
-                    f"O pacote excede o limite de {MAX_FILES} arquivos."
-                )
-            if limits["bytes"] > MAX_UNCOMPRESSED_BYTES:
-                raise ValueError(
-                    "O conteúdo descompactado excede o limite de 300 MB."
-                )
-            extracted.append(
-                {
-                    "source": f"{prefix}/{info.filename}".strip("/"),
-                    "content": payload,
-                }
+            relative = path.relative_to(output_dir).as_posix()
+            payload = path.read_bytes()
+            source = f"{prefix}/{relative}".strip("/")
+            nested = _extract_nested_payload(
+                payload=payload,
+                source=source,
+                lowered=relative.casefold(),
+                limits=limits,
+                depth=depth,
+            )
+            if nested is not None:
+                extracted.extend(nested)
+                continue
+            _register_extracted_file(
+                extracted,
+                source=source,
+                payload=payload,
+                limits=limits,
             )
     return extracted
 
@@ -1191,32 +1434,158 @@ def _extract_package_documents(content: bytes, package_name: str = "") -> list[d
     limits = {"files": 0, "bytes": 0}
     if lowered.endswith(".rar"):
         try:
-            return _extract_all_rar_documents(
+            return _expand_compound_pdf_entries(_extract_all_rar_documents(
                 content,
                 prefix="",
                 limits=limits,
-            )
+                depth=0,
+            ))
         except Exception as exc:
             raise ValueError(
                 "Não foi possível abrir o RAR. Verifique se o arquivo está íntegro."
             ) from exc
     if lowered.endswith((".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2")):
         try:
-            return _extract_all_tar_documents(
+            return _expand_compound_pdf_entries(_extract_all_tar_documents(
                 content,
                 prefix="",
                 depth=0,
                 limits=limits,
-            )
+            ))
         except tarfile.ReadError as exc:
             raise ValueError("O arquivo TAR enviado não é válido.") from exc
-    return _extract_all_zip_documents(content)
+    return _expand_compound_pdf_entries(_extract_all_zip_documents(content))
+
+
+def _selected_pdf_pages(content: bytes, page_numbers: list[int]) -> bytes:
+    reader = PdfReader(BytesIO(content))
+    writer = PdfWriter()
+    for page_number in page_numbers:
+        writer.add_page(reader.pages[page_number - 1])
+    output = BytesIO()
+    writer.write(output)
+    return output.getvalue()
+
+
+def _expand_compound_pdf_entries(entries: list[dict]) -> list[dict]:
+    expanded = []
+    for entry in entries:
+        if not entry["source"].casefold().endswith(".pdf"):
+            expanded.append(entry)
+            continue
+        split_entries = _split_compound_pdf_entry(entry)
+        expanded.extend(split_entries or [entry])
+    return expanded
+
+
+def _split_compound_pdf_entry(entry: dict) -> list[dict]:
+    source = entry["source"]
+    normalized_source = normalize_text(source)
+    likely_compound = any(
+        marker in normalized_source
+        for marker in (
+            "doc hab",
+            "docs hab",
+            "habilitacao",
+            "habilitação",
+            "registros",
+            "documentos",
+        )
+    )
+    try:
+        with pdfplumber.open(BytesIO(entry["content"])) as pdf:
+            if len(pdf.pages) < 4:
+                return []
+            page_infos = []
+            distinct_codes = set()
+            for page_number, page in enumerate(pdf.pages, start=1):
+                try:
+                    text = page.extract_text() or ""
+                except Exception:
+                    text = ""
+                identification = _identify_document_by_content(text)
+                code = identification["code"] if identification else ""
+                if code:
+                    distinct_codes.add(code)
+                page_infos.append((page_number, code, identification))
+    except Exception:
+        return []
+
+    if len(distinct_codes) < 2 and not likely_compound:
+        return []
+
+    groups = []
+    current = None
+    for page_number, code, identification in page_infos:
+        if code:
+            if current is None or current["code"] != code:
+                current = {
+                    "code": code,
+                    "label": identification["label"],
+                    "pages": [],
+                }
+                groups.append(current)
+        if current is not None:
+            current["pages"].append(page_number)
+
+    if len(groups) < 2:
+        return []
+
+    parent = str(PurePosixPath(source).parent)
+    if parent == ".":
+        parent = ""
+    stem = PurePosixPath(source).stem
+    split_entries = []
+    for group in groups:
+        pages = sorted(set(group["pages"]))
+        if not pages:
+            continue
+        page_label = (
+            str(pages[0])
+            if len(pages) == 1
+            else f"{pages[0]}-{pages[-1]}"
+        )
+        split_name = (
+            f"{stem} - páginas {page_label} - "
+            f"{group['code']} - {group['label']}.pdf"
+        )
+        split_source = f"{parent}/{split_name}".strip("/")
+        try:
+            split_content = _selected_pdf_pages(entry["content"], pages)
+        except Exception:
+            continue
+        split_entries.append({"source": split_source, "content": split_content})
+    return split_entries
 
 
 def _safe_basename(name: str) -> str:
     basename = PurePosixPath(name.replace("\\", "/")).name
     cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", basename).strip(" .")
     return cleaned or "documento_sem_nome"
+
+
+def _extract_cnpj(value: str) -> str:
+    digits = re.sub(r"\D", "", value or "")
+    if len(digits) >= 14:
+        return digits[-14:]
+    return ""
+
+
+def _format_cnpj(cnpj: str) -> str:
+    digits = _extract_cnpj(cnpj)
+    if not digits:
+        return ""
+    return (
+        f"{digits[:2]}.{digits[2:5]}.{digits[5:8]}/"
+        f"{digits[8:12]}-{digits[12:]}"
+    )
+
+
+def tcu_validation_url(cnpj_or_supplier: str = "") -> str:
+    cnpj = _extract_cnpj(cnpj_or_supplier)
+    if not cnpj:
+        return TCU_CERTIDOES_URL
+    return f"{TCU_CERTIDOES_URL}?cpfCnpj={cnpj}"
 
 
 def supplier_label_from_package(filename: str) -> str:
@@ -1291,6 +1660,24 @@ def _supplier_from_source(
     return cleaned or "FORNECEDOR_NAO_IDENTIFICADO"
 
 
+def _supplier_cnpj_from_context(
+    *,
+    supplier: str,
+    source: str,
+    default_supplier: str = "",
+    winner: dict | None = None,
+) -> str:
+    if winner:
+        cnpj = _extract_cnpj(winner.get("cnpj", ""))
+        if cnpj:
+            return cnpj
+    for value in (supplier, source, default_supplier):
+        cnpj = _extract_cnpj(value)
+        if cnpj:
+            return cnpj
+    return ""
+
+
 def analyze_document_zip(
     content: bytes,
     profile: str,
@@ -1312,7 +1699,10 @@ def analyze_document_zip(
             filename,
             entry["content"],
         )
-        identification = identify_document(filename, searchable_text)
+        identification = (
+            _identification_from_split_filename(filename)
+            or identify_document(filename, searchable_text)
+        )
         validity = _detect_validity(filename, searchable_text)
         validation_url, validation_note = document_validation(
             identification["code"] if identification else "",
@@ -1324,6 +1714,12 @@ def analyze_document_zip(
             default_supplier,
         )
         winner = _winner_for_supplier(supplier, winners)
+        supplier_cnpj = _supplier_cnpj_from_context(
+            supplier=supplier,
+            source=entry["source"],
+            default_supplier=default_supplier,
+            winner=winner,
+        )
         standardized_name = (
             f"{identification['code']} - {identification['label']}{suffix}"
             if identification
@@ -1347,6 +1743,7 @@ def analyze_document_zip(
             {
                 "source": entry["source"],
                 "supplier": supplier,
+                "supplier_cnpj": supplier_cnpj,
                 "name": filename,
                 "standardized_name": standardized_name,
                 "identified": identification is not None,
@@ -1430,11 +1827,23 @@ def analyze_document_zip(
         for category in ("BÁSICOS", "TÉCNICOS", "NÃO CLASSIFICADOS")
     }
     suppliers = sorted({document["supplier"] for document in documents})
+    supplier_cnpjs = {}
+    for supplier in suppliers:
+        cnpj = next(
+            (
+                document["supplier_cnpj"]
+                for document in documents
+                if document["supplier"] == supplier and document["supplier_cnpj"]
+            ),
+            "",
+        )
+        supplier_cnpjs[supplier] = cnpj
     return {
         "profile": profile,
         "technical_qualification": technical_qualification.strip(),
         "documents": documents,
         "suppliers": suppliers,
+        "supplier_cnpjs": supplier_cnpjs,
         "winners_identified": len(winners),
         "checklist": checklist,
         "totals": totals,
@@ -1473,6 +1882,9 @@ def build_organized_zip(
                     reference_content,
                 )
         for supplier in suppliers:
+            supplier_cnpj = analysis.get("supplier_cnpjs", {}).get(supplier, "")
+            formatted_cnpj = _format_cnpj(supplier_cnpj) or "não identificado"
+            tcu_url = tcu_validation_url(supplier_cnpj or supplier)
             target.writestr(
                 (
                     f"{supplier}/02 - Consulta TCU e CEIS-CNEP/"
@@ -1481,9 +1893,10 @@ def build_organized_zip(
                 "\n".join(
                     [
                         "10.5 - Consulta Consolidada TCU / CEIS-CNEP",
+                        f"CNPJ do fornecedor: {formatted_cnpj}",
                         "",
                         "1) Consultar TCU/APF:",
-                        "https://certidoes-apf.apps.tcu.gov.br/",
+                        tcu_url,
                         "",
                         "2) Se necessário, conferir CEIS/CNEP no Portal da Transparência:",
                         "https://portaldatransparencia.gov.br/sancoes/consulta",
@@ -1707,8 +2120,12 @@ def build_organized_zip(
                 if document["selected_for_requirement"]
                 and document["document_code"] == "7.0.4"
             ]
+            supplier_cnpj = analysis.get("supplier_cnpjs", {}).get(supplier, "")
+            formatted_cnpj = _format_cnpj(supplier_cnpj) or "não identificado"
+            tcu_url = tcu_validation_url(supplier_cnpj or supplier)
             supplier_lines = [
                 f"Fornecedor: {supplier}",
+                f"CNPJ: {formatted_cnpj}",
                 f"Perfil documental: {analysis['profile']}",
                 "",
                 "ORDEM DA PASTA:",
@@ -1769,8 +2186,8 @@ def build_organized_zip(
                 "",
                 "ROTEIRO DE VALIDAÇÃO:",
                 "- 10.5 - Consulta Consolidada TCU / CEIS-CNEP | "
-                "Situação: A conferir | Conferência: "
-                "https://certidoes-apf.apps.tcu.gov.br/",
+                f"CNPJ: {formatted_cnpj} | Situação: A conferir | "
+                f"Conferência: {tcu_url}",
                 *(
                     [
                         f"- {document['standardized_name']} | "

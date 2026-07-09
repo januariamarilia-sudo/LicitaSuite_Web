@@ -28,6 +28,7 @@ from portal.foco_docs import (
     build_print_pdf,
     get_selected_pdf_documents,
     supplier_label_from_package,
+    tcu_validation_url,
 )
 from portal.portal_compras import (
     PORTAL_PARTNERS_URL,
@@ -706,6 +707,7 @@ def render_foco_docs() -> None:
             and document["document_code"] in validation_codes
         ]
         for supplier in analysis.get("suppliers", []) or ["Fornecedor não identificado"]:
+            supplier_cnpj = analysis.get("supplier_cnpjs", {}).get(supplier, "")
             validation_rows.append(
                 {
                     "Fornecedor": supplier,
@@ -713,10 +715,13 @@ def render_foco_docs() -> None:
                     "Grupo": "Consulta de impedimentos",
                     "Validade": "-",
                     "Situação": "A conferir",
-                    "Validar no site oficial": "https://certidoes-apf.apps.tcu.gov.br/",
+                    "Validar no site oficial": tcu_validation_url(
+                        supplier_cnpj or supplier
+                    ),
                     "Orientação": (
-                        "Consultar TCU/APF e, se necessário, CEIS/CNEP no "
-                        "Portal da Transparência."
+                        f"Consultar TCU/APF com o CNPJ "
+                        f"{supplier_cnpj or 'do fornecedor'} e, se necessário, "
+                        "CEIS/CNEP no Portal da Transparência."
                     ),
                 }
             )
