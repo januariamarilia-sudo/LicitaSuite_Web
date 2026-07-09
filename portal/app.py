@@ -18,6 +18,7 @@ from portal.process_store import (
     process_metrics,
     record_generation,
     search_processes,
+    update_technical_qualification,
     update_process_status,
 )
 from portal.foco_docs import (
@@ -369,6 +370,17 @@ def render_processes() -> None:
                 "Objeto",
                 placeholder="Informe uma descrição curta do objeto da contratação.",
             )
+            technical_qualification = st.text_area(
+                "Qualificação técnica exigida",
+                placeholder=(
+                    "Descreva as licenças, autorizações, registros, atestados, "
+                    "certificados e demais exigências técnicas deste processo."
+                ),
+                help=(
+                    "Este texto será usado como referência na separação e na "
+                    "conferência dos documentos dos fornecedores."
+                ),
+            )
             col3, col4 = st.columns(2)
             responsible = col3.text_input("Responsável", placeholder="Nome do responsável")
             observations = col4.text_input(
@@ -386,6 +398,7 @@ def render_processes() -> None:
                             object_description,
                             responsible,
                             observations,
+                            technical_qualification,
                         ),
                     )
                     st.success("Processo criado no novo ambiente.")
@@ -422,6 +435,20 @@ def render_processes() -> None:
             if st.button("Atualizar situação", key=f"update_{process['id']}"):
                 update_process_status(process, status)
                 st.success("Situação atualizada.")
+                st.rerun()
+
+            technical_qualification = st.text_area(
+                "Qualificação técnica exigida",
+                value=process.get("technical_qualification", ""),
+                placeholder="Descreva as exigências técnicas previstas no edital.",
+                key=f"technical_qualification_{process['id']}",
+            )
+            if st.button(
+                "Salvar qualificação técnica",
+                key=f"save_technical_qualification_{process['id']}",
+            ):
+                update_technical_qualification(process, technical_qualification)
+                st.success("Qualificação técnica salva para este processo.")
                 st.rerun()
 
             if process.get("observations"):
@@ -479,6 +506,41 @@ def render_foco_docs() -> None:
         )
 
     st.markdown("### Processar pacote documental")
+    process_options = {
+        process["id"]: f"{process['number']} — {process['object']}"
+        for process in st.session_state.portal_processes
+    }
+    selected_process = None
+    if process_options:
+        selected_process_id = st.selectbox(
+            "Processo da conferência",
+            list(process_options),
+            format_func=process_options.get,
+            key="foco_docs_process",
+        )
+        selected_process = next(
+            process
+            for process in st.session_state.portal_processes
+            if process["id"] == selected_process_id
+        )
+        technical_qualification = selected_process.get(
+            "technical_qualification", ""
+        )
+        if technical_qualification:
+            st.markdown("**Qualificação técnica exigida neste processo:**")
+            st.info(technical_qualification)
+        else:
+            st.warning(
+                "Este processo ainda não possui qualificação técnica cadastrada. "
+                "Preencha o campo no módulo Processos antes da conferência final."
+            )
+    else:
+        technical_qualification = ""
+        st.warning(
+            "Cadastre o processo e sua qualificação técnica no módulo Processos "
+            "para vincular a conferência documental."
+        )
+
     profile = st.selectbox("Perfil documental", list(PROFILE_CHECKLISTS))
     uploaded_zip = st.file_uploader(
         "ZIP da documentação",
@@ -497,13 +559,18 @@ def render_foco_docs() -> None:
         progress = st.progress(15, text="Lendo o pacote documental...")
         try:
             source_bytes = uploaded_zip.getvalue()
-            analysis = analyze_document_zip(source_bytes, profile)
+            analysis = analyze_document_zip(
+                source_bytes,
+                profile,
+                technical_qualification,
+            )
             progress.progress(70, text="Montando checklist e pastas...")
             organized_zip = build_organized_zip(source_bytes, analysis)
             st.session_state.foco_docs_result = {
                 "analysis": analysis,
                 "zip": organized_zip,
                 "source_name": uploaded_zip.name,
+                "process_id": selected_process["id"] if selected_process else None,
             }
             progress.progress(100, text="Organização concluída.")
         except ValueError as exc:

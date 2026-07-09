@@ -100,7 +100,11 @@ def _safe_basename(name: str) -> str:
     return cleaned or "documento_sem_nome"
 
 
-def analyze_document_zip(content: bytes, profile: str) -> dict:
+def analyze_document_zip(
+    content: bytes,
+    profile: str,
+    technical_qualification: str = "",
+) -> dict:
     if profile not in PROFILE_CHECKLISTS:
         raise ValueError(f"Perfil documental inválido: {profile}")
 
@@ -146,6 +150,7 @@ def analyze_document_zip(content: bytes, profile: str) -> dict:
     }
     return {
         "profile": profile,
+        "technical_qualification": technical_qualification.strip(),
         "documents": documents,
         "checklist": checklist,
         "totals": totals,
@@ -197,6 +202,10 @@ def build_organized_zip(content: bytes, analysis: dict) -> bytes:
 
         checklist_lines = [
             f"Perfil documental: {analysis['profile']}",
+            "",
+            "QUALIFICAÇÃO TÉCNICA EXIGIDA:",
+            analysis.get("technical_qualification")
+            or "Não informada para este processo.",
             "",
             *[
                 f"[{'OK' if item['status'] == 'Localizado' else '  '}] "

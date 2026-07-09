@@ -25,6 +25,7 @@ def create_process(
     object_description: str,
     responsible: str = "",
     observations: str = "",
+    technical_qualification: str = "",
 ) -> dict:
     timestamp = _now()
     return {
@@ -34,6 +35,7 @@ def create_process(
         "object": object_description.strip(),
         "responsible": responsible.strip(),
         "observations": observations.strip(),
+        "technical_qualification": technical_qualification.strip(),
         "status": "Em criação",
         "suppliers": 0,
         "items": 0,
@@ -74,6 +76,7 @@ def search_processes(processes: list[dict], term: str) -> list[dict]:
                 process.get("modality", ""),
                 process.get("object", ""),
                 process.get("responsible", ""),
+                process.get("technical_qualification", ""),
                 process.get("status", ""),
             ]
         ).casefold()
@@ -109,6 +112,21 @@ def update_process_status(process: dict, status: str) -> None:
         {
             "title": "Situação atualizada",
             "description": f"Processo alterado para {status}.",
+            "created_at": timestamp,
+        }
+    )
+
+
+def update_technical_qualification(process: dict, description: str) -> None:
+    timestamp = _now()
+    process["technical_qualification"] = description.strip()
+    process["updated_at"] = timestamp
+    process.setdefault("history", []).append(
+        {
+            "title": "Qualificação técnica atualizada",
+            "description": (
+                "Exigências técnicas registradas para a conferência documental."
+            ),
             "created_at": timestamp,
         }
     )

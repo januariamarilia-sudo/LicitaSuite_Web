@@ -15,8 +15,10 @@ def _sample_zip() -> bytes:
 
 def test_foco_docs_classifies_and_repackages_documents():
     source = _sample_zip()
-    analysis = analyze_document_zip(source, "Genérico")
+    qualification = "Licença sanitária e AFE da ANVISA."
+    analysis = analyze_document_zip(source, "Genérico", qualification)
 
+    assert analysis["technical_qualification"] == qualification
     assert analysis["totals"] == {
         "BÁSICOS": 1,
         "TÉCNICOS": 1,
@@ -31,3 +33,6 @@ def test_foco_docs_classifies_and_repackages_documents():
         assert any(name.startswith("02_DOCUMENTOS_TECNICOS/") for name in names)
         assert "RELATORIO_INTELIGENCIA_DOCUMENTAL.csv" in names
         assert "CHECKLIST_DOCUMENTAL.txt" in names
+        checklist = archive.read("CHECKLIST_DOCUMENTAL.txt").decode("utf-8")
+        assert "QUALIFICAÇÃO TÉCNICA EXIGIDA" in checklist
+        assert qualification in checklist
