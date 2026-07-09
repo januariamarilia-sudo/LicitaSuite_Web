@@ -25,6 +25,8 @@ from portal.foco_docs import (
     PROFILE_CHECKLISTS,
     analyze_document_zip,
     build_organized_zip,
+    build_print_pdf,
+    get_selected_pdf_documents,
     supplier_label_from_package,
 )
 from portal.portal_compras import (
@@ -619,12 +621,14 @@ def render_foco_docs() -> None:
             st.session_state.foco_docs_result = {
                 "analysis": analysis,
                 "zip": organized_zip,
+                "source_bytes": source_bytes,
                 "source_name": uploaded_zip.name,
                 "process_id": selected_process["id"] if selected_process else None,
                 "winners_report": (
                     winners_report.name if winners_report is not None else None
                 ),
             }
+            st.session_state.pop("foco_docs_print_result", None)
             progress.progress(100, text="Organização concluída.")
         except ValueError as exc:
             progress.empty()
@@ -666,9 +670,10 @@ def render_foco_docs() -> None:
     with tab_checklist:
         st.dataframe(analysis["checklist"], use_container_width=True, hide_index=True)
     with tab_documents:
-        st.dataframe(
-            [
-                {
+        print_rows = [
+            {
+                    "Selecionar": False,
+                    "ID": document["source"],
                     "Fornecedor": document["supplier"],
                     "Arquivo original": document["name"],
                     "Nome organizado": document["standardized_name"],
@@ -684,10 +689,100 @@ def render_foco_docs() -> None:
                     "Tamanho (KB)": round(document["size"] / 1024, 1),
                 }
                 for document in analysis["documents"]
-            ],
+                if document["extension"] == ".pdf"
+        ]
+        edited_documents = st.data_editor(
+            print_rows,
             use_container_width=True,
             hide_index=True,
+            disabled=[
+                column
+                for column in print_rows[0]
+                if column != "Selecionar"
+            ]
+            if print_rows
+            else True,
+            column_config={
+                "Selecionar": st.column_config.CheckboxColumn(
+                    "Imprimir",
+                    help="Marque os documentos que deseja reunir para impressão.",
+                    default=False,
+                ),
+                "ID": None,
+            },
+            key="foco_docs_print_selection",
         )
+        selected_sources = [
+            row["ID"] for row in edited_documents if row["Selecionar"]
+        ]
+        st.caption(
+            f"{len(selected_sources)} documento(s) selecionado(s) para impressão."
+        )
+        print_mode = st.radio(
+            "Como deseja preparar?",
+            ("Um único PDF", "Documentos separados"),
+            horizontal=True,
+            key="foco_docs_print_mode",
+        )
+        if st.button(
+            "Preparar documentos selecionados para impressão",
+            use_container_width=True,
+            disabled=not selected_sources,
+        ):
+            try:
+                if print_mode == "Um único PDF":
+                    print_pdf, document_count, page_count = build_print_pdf(
+                        result["source_bytes"],
+                        analysis,
+                        selected_sources,
+                    )
+                    st.session_state.foco_docs_print_result = {
+                        "mode": "single",
+                        "pdf": print_pdf,
+                        "documents": document_count,
+                        "pages": page_count,
+                    }
+                else:
+                    individual_documents = get_selected_pdf_documents(
+                        result["source_bytes"],
+                        analysis,
+                        selected_sources,
+                    )
+                    st.session_state.foco_docs_print_result = {
+                        "mode": "individual",
+                        "files": individual_documents,
+                        "documents": len(individual_documents),
+                    }
+            except ValueError as exc:
+                st.error(str(exc))
+
+        print_result = st.session_state.get("foco_docs_print_result")
+        if print_result and print_result["mode"] == "single":
+            st.success(
+                f"PDF preparado: {print_result['documents']} documento(s), "
+                f"{print_result['pages']} página(s)."
+            )
+            st.download_button(
+                "Baixar PDF selecionado para imprimir",
+                data=print_result["pdf"],
+                file_name="documentos_selecionados_para_impressao.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+            )
+        elif print_result and print_result["mode"] == "individual":
+            st.success(
+                f"{print_result['documents']} documento(s) preparado(s) "
+                "separadamente."
+            )
+            for index, document in enumerate(print_result["files"]):
+                st.download_button(
+                    f"Abrir/baixar — {document['name']}",
+                    data=document["content"],
+                    file_name=document["name"],
+                    mime="application/pdf",
+                    use_container_width=True,
+                    key=f"download_individual_{index}_{document['name']}",
+                )
 
     st.download_button(
         "Baixar todos os fornecedores organizados",

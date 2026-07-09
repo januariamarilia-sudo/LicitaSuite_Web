@@ -2,7 +2,13 @@ from io import BytesIO
 import tarfile
 from zipfile import ZipFile
 
-from portal.foco_docs import analyze_document_zip, build_organized_zip
+from pypdf import PdfReader, PdfWriter
+
+from portal.foco_docs import (
+    analyze_document_zip,
+    build_organized_zip,
+    build_print_pdf,
+)
 
 
 def _sample_zip() -> bytes:
@@ -125,3 +131,28 @@ def test_foco_docs_flags_expired_validity_from_filename():
 
     assert document["validity_date"] == "01/01/2020"
     assert document["validity_status"] == "Vencido"
+
+
+def test_foco_docs_builds_one_pdf_from_selected_documents():
+    pdf_buffer = BytesIO()
+    writer = PdfWriter()
+    writer.add_blank_page(width=595, height=842)
+    writer.write(pdf_buffer)
+
+    package = BytesIO()
+    with ZipFile(package, "w") as archive:
+        archive.writestr("FORNECEDOR/CNPJ.pdf", pdf_buffer.getvalue())
+        archive.writestr("FORNECEDOR/Outro.pdf", pdf_buffer.getvalue())
+
+    source = package.getvalue()
+    analysis = analyze_document_zip(source, "Padrão geral")
+    selected = [document["source"] for document in analysis["documents"]]
+    print_pdf, document_count, page_count = build_print_pdf(
+        source,
+        analysis,
+        selected,
+    )
+
+    assert document_count == 2
+    assert page_count == 2
+    assert len(PdfReader(BytesIO(print_pdf)).pages) == 2

@@ -695,6 +695,110 @@ def _merge_pdf_documents(contents: list[bytes]) -> bytes:
         return contents[0]
 
 
+def build_print_pdf(
+    content: bytes,
+    analysis: dict,
+    selected_sources: list[str],
+) -> tuple[bytes, int, int]:
+    selected = set(selected_sources)
+    if not selected:
+        raise ValueError("Selecione pelo menos um documento para imprimir.")
+
+    document_map = {
+        document["source"]: document for document in analysis["documents"]
+    }
+    extracted_entries = _extract_package_documents(
+        content,
+        analysis.get("package_name", ""),
+    )
+    writer = PdfWriter()
+    document_count = 0
+    page_count = 0
+
+    for entry in extracted_entries:
+        source = entry["source"]
+        if source not in selected or source not in document_map:
+            continue
+        document = document_map[source]
+        if document["extension"] != ".pdf":
+            continue
+        payload = entry["content"]
+        if document["document_code"] == "7.0.4":
+            payload, _ = _filter_catalog_pdf(
+                payload,
+                document.get("winner_items", []),
+            )
+        try:
+            reader = PdfReader(BytesIO(payload))
+            for page in reader.pages:
+                writer.add_page(page)
+                page_count += 1
+            document_count += 1
+        except Exception:
+            continue
+
+    if not page_count:
+        raise ValueError(
+            "Nenhum PDF válido foi encontrado entre os documentos selecionados."
+        )
+    output = BytesIO()
+    writer.write(output)
+    return output.getvalue(), document_count, page_count
+
+
+def get_selected_pdf_documents(
+    content: bytes,
+    analysis: dict,
+    selected_sources: list[str],
+) -> list[dict]:
+    selected = set(selected_sources)
+    document_map = {
+        document["source"]: document for document in analysis["documents"]
+    }
+    extracted_entries = _extract_package_documents(
+        content,
+        analysis.get("package_name", ""),
+    )
+    results = []
+    used_names: dict[str, int] = {}
+    for entry in extracted_entries:
+        source = entry["source"]
+        if source not in selected or source not in document_map:
+            continue
+        document = document_map[source]
+        if document["extension"] != ".pdf":
+            continue
+        payload = entry["content"]
+        if document["document_code"] == "7.0.4":
+            payload, _ = _filter_catalog_pdf(
+                payload,
+                document.get("winner_items", []),
+            )
+        try:
+            PdfReader(BytesIO(payload))
+        except Exception:
+            continue
+        desired_name = document["standardized_name"]
+        key = desired_name.casefold()
+        used_names[key] = used_names.get(key, 0) + 1
+        if used_names[key] > 1:
+            path = PurePosixPath(desired_name)
+            desired_name = (
+                f"{path.stem} ({used_names[key]}){path.suffix}"
+            )
+        results.append(
+            {
+                "name": desired_name,
+                "content": payload,
+            }
+        )
+    if not results:
+        raise ValueError(
+            "Nenhum PDF válido foi encontrado entre os documentos selecionados."
+        )
+    return results
+
+
 def _extract_all_zip_documents(
     content: bytes,
     *,
