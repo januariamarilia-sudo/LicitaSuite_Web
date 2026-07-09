@@ -1049,6 +1049,21 @@ def _merge_pdf_documents(contents: list[bytes]) -> bytes:
         return contents[0]
 
 
+def _entries_from_analysis_or_package(content: bytes, analysis: dict) -> list[dict]:
+    cached_entries = analysis.get("_entry_contents")
+    if isinstance(cached_entries, dict) and cached_entries:
+        return [
+            {"source": source, "content": payload}
+            for source, payload in cached_entries.items()
+        ]
+    return _extract_package_documents(
+        content,
+        analysis.get("package_name", ""),
+        split_compound_pdfs=True,
+        split_only_likely_documents=analysis.get("fast_mode", True),
+    )
+
+
 def build_print_pdf(
     content: bytes,
     analysis: dict,
@@ -1061,12 +1076,7 @@ def build_print_pdf(
     document_map = {
         document["source"]: document for document in analysis["documents"]
     }
-    extracted_entries = _extract_package_documents(
-        content,
-        analysis.get("package_name", ""),
-        split_compound_pdfs=True,
-        split_only_likely_documents=analysis.get("fast_mode", True),
-    )
+    extracted_entries = _entries_from_analysis_or_package(content, analysis)
     writer = PdfWriter()
     document_count = 0
     page_count = 0
@@ -1121,12 +1131,7 @@ def get_selected_pdf_documents(
     document_map = {
         document["source"]: document for document in analysis["documents"]
     }
-    extracted_entries = _extract_package_documents(
-        content,
-        analysis.get("package_name", ""),
-        split_compound_pdfs=True,
-        split_only_likely_documents=analysis.get("fast_mode", True),
-    )
+    extracted_entries = _entries_from_analysis_or_package(content, analysis)
     results = []
     used_names: dict[str, int] = {}
     selected_entries = [
@@ -2040,6 +2045,9 @@ def analyze_document_zip(
         "package_name": package_name,
         "fast_mode": fast_mode,
         "allow_ocr": allow_ocr,
+        "_entry_contents": {
+            entry["source"]: entry["content"] for entry in entries
+        },
         "session_date": (
             session_reference_date.strftime("%d/%m/%Y")
             if session_reference_date
@@ -2057,12 +2065,7 @@ def build_organized_zip(
     document_map = {
         document["source"]: document for document in analysis["documents"]
     }
-    extracted_entries = _extract_package_documents(
-        content,
-        analysis.get("package_name", ""),
-        split_compound_pdfs=True,
-        split_only_likely_documents=analysis.get("fast_mode", True),
-    )
+    extracted_entries = _entries_from_analysis_or_package(content, analysis)
 
     with ZipFile(output_buffer, "w", ZIP_DEFLATED) as target:
         output_names: dict[str, int] = {}
