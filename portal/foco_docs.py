@@ -19,7 +19,7 @@ from licitasuite.parsers.vencedores_pdf_robusto import parse_vencedores_pdf_text
 MAX_FILES = 2_000
 MAX_UNCOMPRESSED_BYTES = 300 * 1024 * 1024
 MAX_NESTED_ZIP_DEPTH = 4
-CONDITIONAL_DOCUMENT_CODES = {"10.6.2", "10.6.3"}
+CONDITIONAL_DOCUMENT_CODES = {"10.6.2", "10.6.3", "10.6.4"}
 STANDARD_REQUIRED_CODES = {
     "7.0.1",
     "7.0.2",
@@ -37,7 +37,12 @@ STANDARD_REQUIRED_CODES = {
 MULTIPLE_DOCUMENT_CODES = {"10.6.1", "10.9.3"}
 
 DOCUMENT_RULES = (
-    ("7.0.1", "SICAF", "BÁSICOS", ("sicaf",)),
+    (
+        "7.0.1",
+        "SICAF CRC CAGEF",
+        "BÁSICOS",
+        ("sicaf", "crc", "cagef", "registro cadastral"),
+    ),
     (
         "7.0.2",
         "Proposta Comercial",
@@ -76,6 +81,19 @@ DOCUMENT_RULES = (
         "Autorização de Empresa Estrangeira",
         "BÁSICOS",
         ("empresa estrangeira", "autorizacao funcionamento estrangeira"),
+    ),
+    (
+        "10.6.4",
+        "Certidão Simplificada ME EPP",
+        "BÁSICOS",
+        (
+            "certidao simplificada",
+            "certidão simplificada",
+            "junta comercial",
+            "me epp",
+            "microempresa",
+            "empresa de pequeno porte",
+        ),
     ),
     ("10.7.1", "Comprovante de CNPJ", "BÁSICOS", ("cnpj",)),
     (
@@ -200,9 +218,13 @@ DOCUMENT_RULES = (
 CONTENT_RULES = (
     (
         "7.0.1",
-        "SICAF",
+        "SICAF CRC CAGEF",
         "BÁSICOS",
-        (("sistema de cadastramento unificado de fornecedores",),),
+        (
+            ("sistema de cadastramento unificado de fornecedores",),
+            ("certificado de registro cadastral",),
+            ("cagef", "seplag"),
+        ),
     ),
     (
         "7.0.2",
@@ -239,6 +261,16 @@ CONTENT_RULES = (
         "Autorização de Empresa Estrangeira",
         "BÁSICOS",
         (("decreto de autorizacao", "empresa estrangeira"),),
+    ),
+    (
+        "10.6.4",
+        "Certidão Simplificada ME EPP",
+        "BÁSICOS",
+        (
+            ("certidao simplificada",),
+            ("junta comercial", "microempresa"),
+            ("junta comercial", "empresa de pequeno porte"),
+        ),
     ),
     (
         "10.7.1",
@@ -476,6 +508,45 @@ def document_group(code: str) -> str:
     if code.startswith("10.9"):
         return "Qualificação técnica"
     return "Outros documentos"
+
+
+def _document_order(code: str) -> tuple[int, int, str]:
+    ordered_codes = {
+        "7.0.1": (3, 1),  # SICAF/CRC/CAGEF antes das certidões
+        "10.6.1": (3, 2),
+        "10.6.2": (3, 3),
+        "10.6.3": (3, 4),
+        "10.6.4": (3, 5),
+        "10.7.1": (3, 6),
+        "10.7.2": (3, 7),
+        "10.7.3": (3, 8),
+        "10.7.4": (3, 9),
+        "10.7.5": (3, 10),
+        "10.7.6": (3, 11),
+        "10.8.1": (3, 12),
+        "10.9": (4, 1),
+        "10.9.1": (4, 2),
+        "10.9.2": (4, 3),
+        "10.9.3": (4, 4),
+        "10.9.5": (4, 5),
+        "7.0.2": (5, 1),  # proposta depois da habilitação/técnica
+        "7.0.4": (5, 2),
+        "7.0.3": (5, 3),
+    }
+    stage, order = ordered_codes.get(code, (9, 99))
+    return stage, order, code
+
+
+def _organized_folder(document: dict) -> str:
+    code = document["document_code"]
+    supplier = document["supplier"]
+    if code == "7.0.1" or code.startswith(("10.6", "10.7", "10.8")):
+        return f"{supplier}/03 - Documentos de Habilitação"
+    if code.startswith("10.9"):
+        return f"{supplier}/04 - Qualificação Técnica"
+    if code in {"7.0.2", "7.0.3", "7.0.4"}:
+        return f"{supplier}/05 - Proposta e Itens Vencedores"
+    return f"{supplier}/03 - Documentos de Habilitação"
 
 
 def _official_url_from_document(text: str) -> str:
@@ -718,13 +789,13 @@ def _required_technical_documents(description: str) -> list[tuple[str, str]]:
     return required
 
 
-def _filter_catalog_pdf(content: bytes, winner_items: list[dict]) -> tuple[bytes, int]:
+def _filter_catalog_pdf(content: bytes, winner_items: list[dict]) -> tuple[bytes, list[int]]:
     if not winner_items:
-        return content, 0
+        return content, []
     try:
         reader = PdfReader(BytesIO(content))
         selected_pages = []
-        for page in reader.pages:
+        for page_number, page in enumerate(reader.pages, start=1):
             page_text = normalize_text(page.extract_text() or "")
             page_selected = False
             for item in winner_items:
@@ -760,18 +831,20 @@ def _filter_catalog_pdf(content: bytes, winner_items: list[dict]) -> tuple[bytes
                     page_selected = True
                     break
             if page_selected:
-                selected_pages.append(page)
+                selected_pages.append((page_number, page))
 
         if not selected_pages:
-            return content, 0
+            return content, []
         writer = PdfWriter()
-        for page in selected_pages:
+        page_numbers = []
+        for page_number, page in selected_pages:
+            page_numbers.append(page_number)
             writer.add_page(page)
         output = BytesIO()
         writer.write(output)
-        return output.getvalue(), len(selected_pages)
+        return output.getvalue(), page_numbers
     except Exception:
-        return content, 0
+        return content, []
 
 
 def _merge_pdf_documents(contents: list[bytes]) -> bytes:
@@ -810,10 +883,20 @@ def build_print_pdf(
     document_count = 0
     page_count = 0
 
-    for entry in extracted_entries:
+    selected_entries = [
+        entry
+        for entry in extracted_entries
+        if entry["source"] in selected and entry["source"] in document_map
+    ]
+    selected_entries.sort(
+        key=lambda entry: (
+            _document_order(document_map[entry["source"]]["document_code"]),
+            document_map[entry["source"]]["standardized_name"],
+        )
+    )
+
+    for entry in selected_entries:
         source = entry["source"]
-        if source not in selected or source not in document_map:
-            continue
         document = document_map[source]
         if document["extension"] != ".pdf":
             continue
@@ -856,10 +939,20 @@ def get_selected_pdf_documents(
     )
     results = []
     used_names: dict[str, int] = {}
-    for entry in extracted_entries:
+    selected_entries = [
+        entry
+        for entry in extracted_entries
+        if entry["source"] in selected and entry["source"] in document_map
+    ]
+    selected_entries.sort(
+        key=lambda entry: (
+            _document_order(document_map[entry["source"]]["document_code"]),
+            document_map[entry["source"]]["standardized_name"],
+        )
+    )
+
+    for entry in selected_entries:
         source = entry["source"]
-        if source not in selected or source not in document_map:
-            continue
         document = document_map[source]
         if document["extension"] != ".pdf":
             continue
@@ -1367,10 +1460,49 @@ def build_organized_zip(
 
     with ZipFile(output_buffer, "w", ZIP_DEFLATED) as target:
         output_names: dict[str, int] = {}
-        catalog_groups: dict[str, list[bytes]] = {}
-        for entry in extracted_entries:
-            if entry["source"] not in document_map:
-                continue
+        catalog_groups: dict[str, list[tuple[bytes, dict, list[int]]]] = {}
+        suppliers = analysis.get("suppliers", []) or ["Fornecedor não identificado"]
+        if reference_file:
+            reference_name, reference_content = reference_file
+            for supplier in suppliers:
+                target.writestr(
+                    (
+                        f"{supplier}/01 - Documento do Processo/"
+                        f"01 - {_safe_basename(reference_name)}"
+                    ),
+                    reference_content,
+                )
+        for supplier in suppliers:
+            target.writestr(
+                (
+                    f"{supplier}/02 - Consulta TCU e CEIS-CNEP/"
+                    "02 - Roteiro de consulta.txt"
+                ),
+                "\n".join(
+                    [
+                        "10.5 - Consulta Consolidada TCU / CEIS-CNEP",
+                        "",
+                        "1) Consultar TCU/APF:",
+                        "https://certidoes-apf.apps.tcu.gov.br/",
+                        "",
+                        "2) Se necessário, conferir CEIS/CNEP no Portal da Transparência:",
+                        "https://portaldatransparencia.gov.br/sancoes/consulta",
+                    ]
+                ).encode("utf-8"),
+            )
+
+        sorted_entries = [
+            entry for entry in extracted_entries if entry["source"] in document_map
+        ]
+        sorted_entries.sort(
+            key=lambda entry: (
+                document_map[entry["source"]]["supplier"],
+                _document_order(document_map[entry["source"]]["document_code"]),
+                document_map[entry["source"]]["standardized_name"],
+            )
+        )
+
+        for entry in sorted_entries:
             document = document_map[entry["source"]]
             payload = entry["content"]
             if (
@@ -1382,22 +1514,22 @@ def build_organized_zip(
                     document.get("winner_items", []),
                 )
                 document["catalog_pages_selected"] = selected_pages
-                catalog_groups.setdefault(document["supplier"], []).append(payload)
+                catalog_groups.setdefault(document["supplier"], []).append(
+                    (payload, document, selected_pages)
+                )
                 continue
 
             if document["selected_for_requirement"]:
-                folder = (
-                    f"{document['supplier']}/01 - Documentos Exigidos"
-                )
+                folder = _organized_folder(document)
                 desired_name = document["standardized_name"]
             elif document["identified"]:
                 folder = (
-                    f"{document['supplier']}/02 - Documentos Não Utilizados"
+                    f"{document['supplier']}/06 - Documentos Não Utilizados"
                 )
                 desired_name = document["name"]
             else:
                 folder = (
-                    f"{document['supplier']}/03 - Documentos Não Identificados"
+                    f"{document['supplier']}/07 - Documentos Não Identificados"
                 )
                 desired_name = document["name"]
 
@@ -1413,13 +1545,33 @@ def build_organized_zip(
                 payload,
             )
 
-        for supplier, catalog_contents in catalog_groups.items():
+        for supplier, catalog_items in catalog_groups.items():
             target.writestr(
                 (
-                    f"{supplier}/01 - Documentos Exigidos/"
+                    f"{supplier}/05 - Proposta e Itens Vencedores/"
                     "7.0.4 - Catálogo Itens Vencedores.pdf"
                 ),
-                _merge_pdf_documents(catalog_contents),
+                _merge_pdf_documents([item[0] for item in catalog_items]),
+            )
+            catalog_lines = ["PÁGINAS LOCALIZADAS NO CATÁLOGO", ""]
+            for _, document, pages in catalog_items:
+                if pages:
+                    catalog_lines.append(
+                        f"- {document['name']}: páginas originais "
+                        f"{', '.join(str(page) for page in pages)}."
+                    )
+                else:
+                    catalog_lines.append(
+                        f"- {document['name']}: não foi possível localizar "
+                        "as páginas dos itens vencedores com segurança; "
+                        "o catálogo foi mantido para conferência manual."
+                    )
+            target.writestr(
+                (
+                    f"{supplier}/05 - Proposta e Itens Vencedores/"
+                    "PÁGINAS DO CATÁLOGO.txt"
+                ),
+                "\n".join(catalog_lines).encode("utf-8"),
             )
 
         report = StringIO()
@@ -1442,6 +1594,7 @@ def build_organized_zip(
                 "situacao_validade",
                 "site_validacao",
                 "orientacao_validacao",
+                "paginas_catalogo",
             ]
         )
         for document in analysis["documents"]:
@@ -1463,6 +1616,10 @@ def build_organized_zip(
                     document["validity_status"],
                     document["validation_url"],
                     document["validation_note"],
+                    ", ".join(
+                        str(page)
+                        for page in document.get("catalog_pages_selected", [])
+                    ),
                 ]
             )
         target.writestr(
@@ -1501,6 +1658,13 @@ def build_organized_zip(
                 for document in analysis["documents"]
                 if document["supplier"] == supplier
             ]
+            supplier_documents_sorted = sorted(
+                supplier_documents,
+                key=lambda document: (
+                    _document_order(document["document_code"]),
+                    document["standardized_name"],
+                ),
+            )
             located_codes = {
                 document["document_code"]
                 for document in supplier_documents
@@ -1523,7 +1687,7 @@ def build_organized_zip(
             ]
             validation_documents = [
                 document
-                for document in supplier_documents
+                for document in supplier_documents_sorted
                 if document["selected_for_requirement"]
                 and document["document_code"]
                 in {
@@ -1537,9 +1701,22 @@ def build_organized_zip(
                     "10.8.1",
                 }
             ]
+            catalog_documents = [
+                document
+                for document in supplier_documents_sorted
+                if document["selected_for_requirement"]
+                and document["document_code"] == "7.0.4"
+            ]
             supplier_lines = [
                 f"Fornecedor: {supplier}",
                 f"Perfil documental: {analysis['profile']}",
+                "",
+                "ORDEM DA PASTA:",
+                "01 - Documento do Processo",
+                "02 - Consulta TCU e CEIS-CNEP",
+                "03 - Documentos de Habilitação",
+                "04 - Qualificação Técnica",
+                "05 - Proposta e Itens Vencedores",
                 "",
                 "QUALIFICAÇÃO TÉCNICA EXIGIDA (OPCIONAL):",
                 analysis.get("technical_qualification") or "Não informada.",
@@ -1547,7 +1724,7 @@ def build_organized_zip(
                 "DOCUMENTOS LOCALIZADOS:",
                 *[
                     f"[OK] {document['document_code']} - {document['document_label']}"
-                    for document in supplier_documents
+                    for document in supplier_documents_sorted
                     if document["selected_for_requirement"]
                 ],
                 "",
@@ -1605,6 +1782,23 @@ def build_organized_zip(
                         for document in validation_documents
                     ]
                     or ["Nenhum documento de validação localizado."]
+                ),
+                "",
+                "CATÁLOGO E ITENS VENCEDORES:",
+                *(
+                    [
+                        (
+                            f"- {document['standardized_name']}: páginas originais "
+                            f"{', '.join(str(page) for page in document.get('catalog_pages_selected', []))}"
+                        )
+                        if document.get("catalog_pages_selected")
+                        else (
+                            f"- {document['standardized_name']}: páginas dos itens "
+                            "vencedores não localizadas automaticamente; conferir manualmente."
+                        )
+                        for document in catalog_documents
+                    ]
+                    or ["Nenhum catálogo selecionado para os itens vencedores."]
                 ),
             ]
             target.writestr(

@@ -16,6 +16,7 @@ def _sample_zip() -> bytes:
     buffer = BytesIO()
     with ZipFile(buffer, "w") as archive:
         archive.writestr("fornecedor/CNPJ.pdf", b"cnpj")
+        archive.writestr("fornecedor/Certidao Simplificada.pdf", b"certidao simplificada")
         archive.writestr("fornecedor/Atestado Capacidade Tecnica.pdf", b"atestado")
         archive.writestr("fornecedor/foto_documento.png", b"image")
     return buffer.getvalue()
@@ -70,7 +71,7 @@ def test_foco_docs_classifies_and_repackages_documents():
     )
     assert "receita.fazenda.gov.br" in cnpj_document["validation_url"]
     assert analysis["totals"] == {
-        "BÁSICOS": 1,
+        "BÁSICOS": 2,
         "TÉCNICOS": 1,
         "NÃO CLASSIFICADOS": 1,
     }
@@ -84,17 +85,32 @@ def test_foco_docs_classifies_and_repackages_documents():
     with ZipFile(BytesIO(organized)) as archive:
         names = archive.namelist()
         assert (
-            "fornecedor/01 - Documentos Exigidos/"
+            "fornecedor/03 - Documentos de Habilitação/"
             "10.7.1 - Comprovante de CNPJ.pdf"
             in names
         )
         assert (
-            "fornecedor/02 - Documentos Não Utilizados/"
+            "fornecedor/03 - Documentos de Habilitação/"
+            "10.6.4 - Certidão Simplificada ME EPP.pdf"
+            in names
+        )
+        assert (
+            "fornecedor/02 - Consulta TCU e CEIS-CNEP/"
+            "02 - Roteiro de consulta.txt"
+            in names
+        )
+        assert (
+            "fornecedor/01 - Documento do Processo/"
+            "01 - relatorio_itens_vencidos.csv"
+            in names
+        )
+        assert (
+            "fornecedor/06 - Documentos Não Utilizados/"
             "Atestado Capacidade Tecnica.pdf"
             in names
         )
         assert (
-            "fornecedor/03 - Documentos Não Identificados/foto_documento.png"
+            "fornecedor/07 - Documentos Não Identificados/foto_documento.png"
             in names
         )
         assert "fornecedor/RELATÓRIO DE CONFERÊNCIA.txt" in names
@@ -116,7 +132,7 @@ def test_foco_docs_extracts_nested_supplier_zip():
     organized = build_organized_zip(source, analysis)
     with ZipFile(BytesIO(organized)) as archive:
         assert (
-            "EMPRESA EXEMPLO/01 - Documentos Exigidos/"
+            "EMPRESA EXEMPLO/03 - Documentos de Habilitação/"
             "10.6.1 - Ato Constitutivo e Contrato Social.pdf"
             in archive.namelist()
         )

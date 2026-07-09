@@ -579,12 +579,13 @@ def render_foco_docs() -> None:
         help="Dentro do ZIP, mantenha uma pasta com o nome de cada fornecedor.",
     )
     winners_report = upload_col2.file_uploader(
-        "2. Relatório PDF de itens vencidos (opcional)",
+        "2. Documento do processo / itens vencedores (opcional)",
         type=["pdf"],
         key="foco_docs_winners_report",
         help=(
-            "O relatório será incluído no pacote como referência para a "
-            "conferência dos catálogos e registros dos produtos."
+            "Ex.: Registro de Preço ou relatório de vencedores. Ele será "
+            "colocado no início da pasta e usado como referência para "
+            "catálogos e itens vencedores."
         ),
     )
     process = st.button(
@@ -645,8 +646,9 @@ def render_foco_docs() -> None:
     if not result:
         st.caption(
             "Você receberá um único ZIP. Dentro dele, cada fornecedor terá a pasta "
-            "'01 - Documentos Exigidos', a pasta '02 - Documentos Não Utilizados', "
-            "a pasta '03 - Documentos Não Identificados' e seu relatório."
+            "'01 - Documento do Processo', '02 - Consulta TCU e CEIS-CNEP', "
+            "'03 - Documentos de Habilitação', '04 - Qualificação Técnica', "
+            "'05 - Proposta e Itens Vencedores' e seu relatório."
         )
         return
 
