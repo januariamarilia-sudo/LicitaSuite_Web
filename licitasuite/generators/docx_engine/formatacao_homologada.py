@@ -11,6 +11,9 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
 
 
+NAO_LOCALIZADA = "[INFORMAÇÃO NÃO LOCALIZADA]"
+
+
 def _texto(valor: Any) -> str:
     return str(valor or "").strip()
 
@@ -38,10 +41,7 @@ def _title_empresa(nome: str) -> str:
 
     for parte in partes:
         p = parte.upper().replace("S/A", "S.A.")
-        if p in especiais:
-            saida.append(p)
-        else:
-            saida.append(parte.capitalize())
+        saida.append(p if p in especiais else parte.capitalize())
 
     return " ".join(saida)
 
@@ -79,73 +79,140 @@ def _set_cell_text(cell, text: str, size: int = 8, bold: bool = False, center: b
     _set_run(r, bold=bold, size=size)
 
 
-def _safe_get(obj: Any, *names: str, default: str = "") -> str:
+def _norm_key(name: str) -> str:
+    text = str(name or "").strip().lower()
+    repl = {
+        "á": "a", "à": "a", "â": "a", "ã": "a",
+        "é": "e", "ê": "e",
+        "í": "i",
+        "ó": "o", "ô": "o", "õ": "o",
+        "ú": "u",
+        "ç": "c",
+    }
+    for a, b in repl.items():
+        text = text.replace(a, b)
+    text = re.sub(r"[^a-z0-9]+", "_", text)
+    return text.strip("_")
+
+
+def _dict_like_get(obj: Any, *names: str) -> str:
+    if isinstance(obj, dict):
+        norm_map = {_norm_key(k): v for k, v in obj.items()}
+        for name in names:
+            value = norm_map.get(_norm_key(name))
+            if value:
+                return _texto(value)
+    return ""
+
+
+def _attr_get(obj: Any, *names: str) -> str:
+    if obj is None:
+        return ""
+
+    # dict ou similar
+    val = _dict_like_get(obj, *names)
+    if val:
+        return val
+
+    # atributos comuns
     for name in names:
-        value = getattr(obj, name, None)
-        if value:
-            return _texto(value)
-    return default
+        candidates = {
+            name,
+            name.lower(),
+            name.upper(),
+            _norm_key(name),
+        }
+
+        for candidate in candidates:
+            value = getattr(obj, candidate, None)
+            if value:
+                return _texto(value)
+
+    # alguns objetos usam __dict__
+    data = getattr(obj, "__dict__", None)
+    if isinstance(data, dict):
+        val = _dict_like_get(data, *names)
+        if val:
+            return val
+
+    return ""
+
+
+def _safe_get(obj: Any, *names: str, default: str = "") -> str:
+    value = _attr_get(obj, *names)
+    return value if value else default
 
 
 def _get_from_supplier(ata: Any, *names: str, default: str = "") -> str:
-    for source_name in ("fornecedor", "supplier", "dados_fornecedor", "fornecedor_dados"):
+    for source_name in ("fornecedor", "supplier", "dados_fornecedor", "fornecedor_dados", "cadastro", "dados"):
         source = getattr(ata, source_name, None)
-        if source:
-            for name in names:
-                value = getattr(source, name, None)
-                if value:
-                    return _texto(value)
-    return default
+        value = _attr_get(source, *names)
+        if value:
+            return value
+
+    # também tenta na própria ata por segurança
+    value = _attr_get(ata, *names)
+    return value if value else default
+
+
+def _fallback(value: str) -> str:
+    return value if _texto(value) else NAO_LOCALIZADA
 
 
 def _ata_empresa(ata: Any) -> str:
     return (
-        _safe_get(ata, "fornecedor_nome", "razao_social", "nome_fornecedor")
-        or _get_from_supplier(ata, "razao_social", "nome", "fornecedor_nome")
+        _safe_get(ata, "fornecedor_nome", "razao_social", "razão social", "nome_fornecedor", "FORNECEDOR")
+        or _get_from_supplier(ata, "FORNECEDOR", "fornecedor", "razao_social", "razão social", "nome", "fornecedor_nome")
     )
 
 
 def _ata_endereco(ata: Any) -> str:
-    return _safe_get(ata, "endereco_fornecedor", "endereco") or _get_from_supplier(ata, "endereco")
+    return _fallback(_safe_get(ata, "endereco_fornecedor", "endereco", "ENDEREÇO") or _get_from_supplier(ata, "ENDEREÇO", "endereco"))
 
 
 def _ata_cep(ata: Any) -> str:
-    return _safe_get(ata, "cep") or _get_from_supplier(ata, "cep")
+    return _fallback(_safe_get(ata, "cep", "CEP") or _get_from_supplier(ata, "CEP", "cep"))
 
 
 def _ata_fone(ata: Any) -> str:
-    return _safe_get(ata, "telefone", "fone") or _get_from_supplier(ata, "telefone", "fone")
+    return _fallback(_safe_get(ata, "telefone", "fone", "FONE") or _get_from_supplier(ata, "FONE", "telefone", "fone"))
 
 
 def _ata_email(ata: Any) -> str:
-    return _safe_get(ata, "email", "e_mail") or _get_from_supplier(ata, "email", "e_mail")
+    return _fallback(_safe_get(ata, "email", "e_mail", "EMAIL") or _get_from_supplier(ata, "EMAIL", "email", "e_mail"))
 
 
 def _ata_cnpj(ata: Any) -> str:
-    return _safe_get(ata, "cnpj") or _get_from_supplier(ata, "cnpj")
+    return _fallback(_safe_get(ata, "cnpj", "CNPJ") or _get_from_supplier(ata, "CNPJ", "cnpj"))
 
 
 def _ata_ie(ata: Any) -> str:
-    return _safe_get(ata, "inscricao_estadual", "ie") or _get_from_supplier(ata, "inscricao_estadual", "ie")
+    return (
+        _safe_get(ata, "inscricao_estadual", "inscrição estadual", "INSCRIÇÃO ESTAUDAL", "INSCRIÇÃO ESTADUAL", "ie")
+        or _get_from_supplier(ata, "INSCRIÇÃO ESTAUDAL", "INSCRIÇÃO ESTADUAL", "inscricao_estadual", "inscrição estadual", "ie")
+    )
 
 
 def _ata_representante(ata: Any) -> str:
-    return (
-        _safe_get(ata, "representante", "representante_legal", "socio")
-        or _get_from_supplier(ata, "representante", "representante_legal", "socio")
+    return _fallback(
+        _safe_get(ata, "representante", "representante_legal", "REPRESENTANTE", "socio")
+        or _get_from_supplier(ata, "REPRESENTANTE", "representante", "representante_legal", "socio")
     )
 
 
 def _ata_cpf(ata: Any) -> str:
-    return _safe_get(ata, "cpf") or _get_from_supplier(ata, "cpf")
+    return _fallback(_safe_get(ata, "cpf", "CPF") or _get_from_supplier(ata, "CPF", "cpf"))
 
 
 def _ata_rg(ata: Any) -> str:
-    return _safe_get(ata, "rg") or _get_from_supplier(ata, "rg")
+    return _fallback(_safe_get(ata, "rg", "RG") or _get_from_supplier(ata, "RG", "rg"))
 
 
 def _ata_orgao(ata: Any) -> str:
-    return _safe_get(ata, "orgao", "orgao_expedidor") or _get_from_supplier(ata, "orgao", "orgao_expedidor")
+    return _fallback(
+        _safe_get(ata, "orgao", "órgão", "orgao_expedidor", "ORGAO", "ÓRGÃO")
+        or _get_from_supplier(ata, "ORGAO", "ÓRGÃO", "orgao", "órgão", "orgao_expedidor")
+    )
 
 
 def _extrair_processo_pregao(texto: str) -> tuple[str, str]:
@@ -257,12 +324,10 @@ def formatar_assinaturas(document: Document, ata: Any):
     empresa_ass = _title_empresa(empresa)
     representante_ass = _normalizar_representante_assinatura(representante)
 
-    # Ajusta apenas o bloco do fornecedor se for localizado. Não mexe no bloco do diretor.
     for p in document.paragraphs:
         txt = (p.text or "").strip()
         low = txt.lower()
 
-        # Remove blocos antigos pequenos criados acima da assinatura.
         if (empresa.lower() in low or representante.lower() in low) and len(txt) <= 180:
             _limpar_paragrafo(p)
 
@@ -277,7 +342,6 @@ def formatar_assinaturas(document: Document, ata: Any):
                     p = cell.paragraphs[0]
                     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-                    # quatro linhas de espaçamento acima do bloco do fornecedor
                     _run(p, "\n\n\n\n", False)
                     _run(p, representante_ass, True)
                     _run(p, "\n", False)
