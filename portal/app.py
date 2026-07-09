@@ -738,6 +738,7 @@ def render_foco_docs() -> None:
                 "Validade": document["validity_date"] or "-",
                 "Situação": document["validity_status"],
                 "Validar no site oficial": document["validation_url"] or None,
+                "Dados para consulta": document.get("validation_data", ""),
                 "Orientação": document["validation_note"],
             }
             for document in analysis["documents"]
@@ -756,6 +757,7 @@ def render_foco_docs() -> None:
                     "Validar no site oficial": tcu_validation_url(
                         supplier_cnpj or supplier
                     ),
+                    "Dados para consulta": supplier_cnpj or "",
                     "Orientação": (
                         f"Consultar TCU/APF com o CNPJ "
                         f"{supplier_cnpj or 'do fornecedor'} e, se necessário, "
@@ -836,6 +838,7 @@ def render_foco_docs() -> None:
                     "Validade": document["validity_date"] or "-",
                     "Situação": document["validity_status"],
                     "Validar no site oficial": document["validation_url"] or None,
+                    "Dados para consulta": document.get("validation_data", ""),
                     "Orientação": document["validation_note"],
                     "Categoria": document["category"],
                     "Extensão": document["extension"],

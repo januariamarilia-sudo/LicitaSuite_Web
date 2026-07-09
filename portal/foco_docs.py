@@ -459,6 +459,30 @@ PROFILE_CHECKLISTS = {
     ),
 }
 
+CHECKLIST_CODE_MAP = {
+    "sicaf": {"7.0.1"},
+    "proposta comercial": {"7.0.2"},
+    "requerimento": {"7.0.3"},
+    "catalogo dos itens vencedores": {"7.0.4"},
+    "contrato social": {"10.6.1"},
+    "ato constitutivo": {"10.6.1"},
+    "cnpj": {"10.7.1"},
+    "certidao federal": {"10.7.2"},
+    "certidao estadual": {"10.7.3"},
+    "certidao municipal": {"10.7.4"},
+    "fgts": {"10.7.5"},
+    "cndt": {"10.7.6"},
+    "certidao de falencia": {"10.8.1"},
+    "regularidade fiscal": {"10.7.1", "10.7.2", "10.7.3", "10.7.4", "10.7.5"},
+    "regularidade trabalhista": {"10.7.6"},
+    "qualificacao tecnica": {"10.9", "10.9.1", "10.9.2", "10.9.3", "10.9.5"},
+    "licenca sanitaria": {"10.9.1"},
+    "afe/anvisa": {"10.9.2"},
+    "responsavel tecnico": {"10.9"},
+    "conselho profissional": {"10.9"},
+    "atestado de capacidade": {"10.9"},
+}
+
 
 def normalize_text(value: str) -> str:
     decomposed = unicodedata.normalize("NFKD", value)
@@ -660,7 +684,38 @@ def _official_url_from_document(text: str) -> str:
     return ""
 
 
-def document_validation(code: str, document_text: str = "") -> tuple[str, str]:
+def _validation_data_text(
+    *,
+    cnpj: str = "",
+    validity_date: str = "",
+) -> str:
+    parts = []
+    formatted_cnpj = _format_cnpj(cnpj)
+    if formatted_cnpj:
+        parts.append(f"CNPJ: {formatted_cnpj}")
+    if validity_date:
+        parts.append(f"Validade: {validity_date}")
+    return " | ".join(parts)
+
+
+def document_validation(
+    code: str,
+    document_text: str = "",
+    *,
+    supplier_cnpj: str = "",
+    validity_date: str = "",
+) -> tuple[str, str, str]:
+    validation_data = _validation_data_text(
+        cnpj=supplier_cnpj or _extract_cnpj(document_text),
+        validity_date=validity_date,
+    )
+    extracted_url = _official_url_from_document(document_text)
+    if extracted_url:
+        note = "Endereço oficial de autenticação localizado no documento."
+        if validation_data:
+            note = f"{note} Dados: {validation_data}."
+        return extracted_url, note, validation_data
+
     official_links = {
         "7.0.1": (
             "https://www.gov.br/compras/pt-br/sicaf-digital",
@@ -701,19 +756,18 @@ def document_validation(code: str, document_text: str = "") -> tuple[str, str]:
         "10.9": "Validar no conselho profissional que emitiu o certificado.",
     }
     regional_codes = {"10.7.3", "10.7.4", "10.8.1", "10.9.1", "10.9"}
-    if code in regional_codes:
-        extracted_url = _official_url_from_document(document_text)
-        if extracted_url:
-            return (
-                extracted_url,
-                "Endereço oficial de autenticação localizado no documento.",
-            )
     if code in official_links:
-        return official_links[code]
-    return "", regional_notes.get(
+        url, note = official_links[code]
+        if validation_data:
+            note = f"{note} Dados para consulta: {validation_data}."
+        return url, note, validation_data
+    note = regional_notes.get(
         code,
         "Conferência documental sem consulta pública única.",
     )
+    if validation_data:
+        note = f"{note} Dados para consulta: {validation_data}."
+    return "", note, validation_data
 
 
 def _ocr_document(filename: str, content: bytes) -> str:
@@ -890,6 +944,35 @@ def _required_technical_documents(description: str) -> list[tuple[str, str]]:
             required.append((code, label))
             seen.add((code, label))
     return required
+
+
+def _build_checklist(profile: str, documents: list[dict]) -> list[dict]:
+    found_codes = {
+        document["document_code"]
+        for document in documents
+        if document.get("identified") and document.get("document_code")
+    }
+    searchable_names = " ".join(
+        f"{document.get('name', '')} {document.get('standardized_name', '')} "
+        f"{document.get('document_label', '')}"
+        for document in documents
+    )
+    normalized_names = normalize_text(searchable_names)
+    checklist = []
+    for label, keywords in PROFILE_CHECKLISTS[profile]:
+        normalized_label = normalize_text(label)
+        mapped_codes = CHECKLIST_CODE_MAP.get(normalized_label, set())
+        found_by_code = bool(mapped_codes and mapped_codes.intersection(found_codes))
+        found_by_text = any(
+            normalize_text(keyword) in normalized_names for keyword in keywords
+        )
+        checklist.append(
+            {
+                "document": label,
+                "status": "Localizado" if found_by_code or found_by_text else "Pendente",
+            }
+        )
+    return checklist
 
 
 def _filter_catalog_pdf(content: bytes, winner_items: list[dict]) -> tuple[bytes, list[int]]:
@@ -1811,10 +1894,6 @@ def analyze_document_zip(
             searchable_text,
             reference_date=session_reference_date,
         )
-        validation_url, validation_note = document_validation(
-            identification["code"] if identification else "",
-            searchable_text,
-        )
         supplier = _supplier_from_source(
             entry["source"],
             winners,
@@ -1826,6 +1905,12 @@ def analyze_document_zip(
             source=entry["source"],
             default_supplier=default_supplier,
             winner=winner,
+        )
+        validation_url, validation_note, validation_data = document_validation(
+            identification["code"] if identification else "",
+            searchable_text,
+            supplier_cnpj=supplier_cnpj,
+            validity_date=validity["validity_date"],
         )
         standardized_name = (
             f"{identification['code']} - {identification['label']}{suffix}"
@@ -1861,6 +1946,7 @@ def analyze_document_zip(
                 ),
                 "validation_url": validation_url,
                 "validation_note": validation_note,
+                "validation_data": validation_data,
                 "identification_confidence": (
                     identification["confidence"] if identification else 0
                 ),
@@ -1922,12 +2008,7 @@ def analyze_document_zip(
         for document in selected:
             document["selected_for_requirement"] = True
 
-    all_names = " ".join(document["name"] for document in documents)
-    normalized_names = normalize_text(all_names)
-    checklist = []
-    for label, keywords in PROFILE_CHECKLISTS[profile]:
-        found = any(normalize_text(keyword) in normalized_names for keyword in keywords)
-        checklist.append({"document": label, "status": "Localizado" if found else "Pendente"})
+    checklist = _build_checklist(profile, documents)
 
     totals = {
         category: sum(document["category"] == category for document in documents)
@@ -2122,6 +2203,7 @@ def build_organized_zip(
                 "validade",
                 "situacao_validade",
                 "site_validacao",
+                "dados_validacao",
                 "orientacao_validacao",
                 "paginas_catalogo",
             ]
@@ -2144,6 +2226,7 @@ def build_organized_zip(
                     document["validity_date"],
                     document["validity_status"],
                     document["validation_url"],
+                    document.get("validation_data", ""),
                     document["validation_note"],
                     ", ".join(
                         str(page)

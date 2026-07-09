@@ -70,6 +70,10 @@ def test_foco_docs_classifies_and_repackages_documents():
         if document["name"] == "CNPJ.pdf"
     )
     assert "receita.fazenda.gov.br" in cnpj_document["validation_url"]
+    checklist = {
+        item["document"]: item["status"] for item in analysis["checklist"]
+    }
+    assert checklist["CNPJ"] == "Localizado"
     assert analysis["totals"] == {
         "BÁSICOS": 2,
         "TÉCNICOS": 1,
@@ -212,10 +216,12 @@ def test_foco_docs_builds_one_pdf_from_selected_documents():
 
 
 def test_foco_docs_uses_official_regional_validation_url_from_document():
-    url, note = document_validation(
+    url, note, data = document_validation(
         "10.7.3",
         "Valide esta certidão em https://www.fazenda.mg.gov.br/validar",
+        supplier_cnpj="12.345.678/0001-99",
     )
 
     assert url == "https://www.fazenda.mg.gov.br/validar"
     assert "localizado no documento" in note
+    assert "12.345.678/0001-99" in data
