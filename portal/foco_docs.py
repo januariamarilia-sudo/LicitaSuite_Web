@@ -1885,15 +1885,28 @@ def analyze_document_zip(
     for entry in entries:
         filename = _safe_basename(entry["source"])
         suffix = PurePosixPath(filename).suffix.casefold()
-        searchable_text, ocr_used = _extract_searchable_text(
-            filename,
-            entry["content"],
-            allow_ocr=allow_ocr,
-        )
-        identification = (
+        preliminary_identification = (
             _identification_from_split_filename(filename)
-            or identify_document(filename, searchable_text)
+            or identify_document(filename, "")
         )
+        can_skip_content = (
+            fast_mode
+            and preliminary_identification is not None
+            and not allow_ocr
+        )
+        if can_skip_content:
+            searchable_text, ocr_used = "", False
+            identification = preliminary_identification
+        else:
+            searchable_text, ocr_used = _extract_searchable_text(
+                filename,
+                entry["content"],
+                allow_ocr=allow_ocr,
+            )
+            identification = preliminary_identification or identify_document(
+                filename,
+                searchable_text,
+            )
         validity = _detect_validity(
             filename,
             searchable_text,
