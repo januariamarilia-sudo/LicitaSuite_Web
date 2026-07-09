@@ -572,6 +572,25 @@ def render_foco_docs() -> None:
         "10.6, 10.7 e 10.8. "
         "Qualificação técnica 10.9: somente quando informada acima."
     )
+    fast_mode = st.checkbox(
+        "Modo rápido: localizar e renomear somente documentos exigidos",
+        value=True,
+        help=(
+            "Recomendado. O sistema procura a lista exigida, renomeia apenas "
+            "o que pertence ao edital e envia o restante para documentos não "
+            "utilizados/não identificados."
+        ),
+        key="foco_docs_fast_mode",
+    )
+    allow_ocr = st.checkbox(
+        "Usar OCR para PDFs escaneados (mais demorado)",
+        value=False,
+        help=(
+            "Ative apenas quando os documentos forem imagem/escaneados e não "
+            "forem reconhecidos no modo rápido."
+        ),
+        key="foco_docs_allow_ocr",
+    )
     upload_col1, upload_col2 = st.columns(2)
     uploaded_zip = upload_col1.file_uploader(
         "1. Pacote com as pastas dos fornecedores",
@@ -590,7 +609,7 @@ def render_foco_docs() -> None:
         ),
     )
     process = st.button(
-        "Separar e renomear todos os documentos",
+        "Localizar e organizar documentos exigidos",
         type="primary",
         use_container_width=True,
         disabled=uploaded_zip is None,
@@ -612,6 +631,8 @@ def render_foco_docs() -> None:
                 reference_file,
                 supplier_label_from_package(uploaded_zip.name),
                 uploaded_zip.name,
+                fast_mode=fast_mode,
+                allow_ocr=allow_ocr,
             )
             progress.progress(
                 70,
@@ -649,7 +670,8 @@ def render_foco_docs() -> None:
             "Você receberá um único ZIP. Dentro dele, cada fornecedor terá a pasta "
             "'01 - Documento do Processo', '02 - Consulta TCU e CEIS-CNEP', "
             "'03 - Documentos de Habilitação', '04 - Qualificação Técnica', "
-            "'05 - Proposta e Itens Vencedores' e seu relatório."
+            "'05 - Proposta e Itens Vencedores', '06 - Documentos Fora da Lista' "
+            "e seu relatório."
         )
         return
 

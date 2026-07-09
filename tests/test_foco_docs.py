@@ -105,7 +105,7 @@ def test_foco_docs_classifies_and_repackages_documents():
             in names
         )
         assert (
-            "fornecedor/06 - Documentos Não Utilizados/"
+            "fornecedor/06 - Documentos Fora da Lista/"
             "Atestado Capacidade Tecnica.pdf"
             in names
         )

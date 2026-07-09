@@ -741,7 +741,12 @@ def _ocr_document(filename: str, content: bytes) -> str:
     return ""
 
 
-def _extract_searchable_text(filename: str, content: bytes) -> tuple[str, bool]:
+def _extract_searchable_text(
+    filename: str,
+    content: bytes,
+    *,
+    allow_ocr: bool = True,
+) -> tuple[str, bool]:
     suffix = PurePosixPath(filename).suffix.casefold()
     try:
         if suffix == ".pdf":
@@ -752,6 +757,8 @@ def _extract_searchable_text(filename: str, content: bytes) -> tuple[str, bool]:
                 )
             if len(text.strip()) >= 80:
                 return text, False
+            if not allow_ocr:
+                return text, False
             ocr_text = _ocr_document(filename, content)
             return ocr_text or text, bool(ocr_text)
         if suffix == ".docx":
@@ -761,6 +768,8 @@ def _extract_searchable_text(filename: str, content: bytes) -> tuple[str, bool]:
                 False,
             )
         if suffix in {".png", ".jpg", ".jpeg", ".tif", ".tiff"}:
+            if not allow_ocr:
+                return "", False
             ocr_text = _ocr_document(filename, content)
             return ocr_text, bool(ocr_text)
     except Exception:
@@ -966,6 +975,8 @@ def build_print_pdf(
     extracted_entries = _extract_package_documents(
         content,
         analysis.get("package_name", ""),
+        split_compound_pdfs=True,
+        split_only_likely_documents=analysis.get("fast_mode", True),
     )
     writer = PdfWriter()
     document_count = 0
@@ -1024,6 +1035,8 @@ def get_selected_pdf_documents(
     extracted_entries = _extract_package_documents(
         content,
         analysis.get("package_name", ""),
+        split_compound_pdfs=True,
+        split_only_likely_documents=analysis.get("fast_mode", True),
     )
     results = []
     used_names: dict[str, int] = {}
@@ -1429,32 +1442,50 @@ def _extract_rar_with_external_tool(
     return extracted
 
 
-def _extract_package_documents(content: bytes, package_name: str = "") -> list[dict]:
+def _extract_package_documents(
+    content: bytes,
+    package_name: str = "",
+    *,
+    split_compound_pdfs: bool = True,
+    split_only_likely_documents: bool = False,
+) -> list[dict]:
     lowered = package_name.casefold()
     limits = {"files": 0, "bytes": 0}
     if lowered.endswith(".rar"):
         try:
-            return _expand_compound_pdf_entries(_extract_all_rar_documents(
-                content,
-                prefix="",
-                limits=limits,
-                depth=0,
-            ))
+            return _expand_compound_pdf_entries(
+                _extract_all_rar_documents(
+                    content,
+                    prefix="",
+                    limits=limits,
+                    depth=0,
+                ),
+                enabled=split_compound_pdfs,
+                only_likely_documents=split_only_likely_documents,
+            )
         except Exception as exc:
             raise ValueError(
                 "Não foi possível abrir o RAR. Verifique se o arquivo está íntegro."
             ) from exc
     if lowered.endswith((".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2")):
         try:
-            return _expand_compound_pdf_entries(_extract_all_tar_documents(
-                content,
-                prefix="",
-                depth=0,
-                limits=limits,
-            ))
+            return _expand_compound_pdf_entries(
+                _extract_all_tar_documents(
+                    content,
+                    prefix="",
+                    depth=0,
+                    limits=limits,
+                ),
+                enabled=split_compound_pdfs,
+                only_likely_documents=split_only_likely_documents,
+            )
         except tarfile.ReadError as exc:
             raise ValueError("O arquivo TAR enviado não é válido.") from exc
-    return _expand_compound_pdf_entries(_extract_all_zip_documents(content))
+    return _expand_compound_pdf_entries(
+        _extract_all_zip_documents(content),
+        enabled=split_compound_pdfs,
+        only_likely_documents=split_only_likely_documents,
+    )
 
 
 def _selected_pdf_pages(content: bytes, page_numbers: list[int]) -> bytes:
@@ -1467,10 +1498,52 @@ def _selected_pdf_pages(content: bytes, page_numbers: list[int]) -> bytes:
     return output.getvalue()
 
 
-def _expand_compound_pdf_entries(entries: list[dict]) -> list[dict]:
+def _pdf_page_count(content: bytes) -> int:
+    try:
+        return len(PdfReader(BytesIO(content)).pages)
+    except Exception:
+        return 0
+
+
+def _should_try_split_pdf(entry: dict, *, only_likely_documents: bool) -> bool:
+    normalized_source = normalize_text(entry["source"])
+    likely_compound = any(
+        marker in normalized_source
+        for marker in (
+            "doc hab",
+            "docs hab",
+            "habilitacao",
+            "habilitação",
+            "registros",
+            "documentos",
+            "icismep",
+        )
+    )
+    if likely_compound:
+        return True
+    if not only_likely_documents:
+        return True
+    page_count = _pdf_page_count(entry["content"])
+    return page_count >= 12 and bool(re.search(r"\b(?:pe|pregao|processo|20\d{2}|38)\b", normalized_source))
+
+
+def _expand_compound_pdf_entries(
+    entries: list[dict],
+    *,
+    enabled: bool = True,
+    only_likely_documents: bool = False,
+) -> list[dict]:
+    if not enabled:
+        return entries
     expanded = []
     for entry in entries:
         if not entry["source"].casefold().endswith(".pdf"):
+            expanded.append(entry)
+            continue
+        if not _should_try_split_pdf(
+            entry,
+            only_likely_documents=only_likely_documents,
+        ):
             expanded.append(entry)
             continue
         split_entries = _split_compound_pdf_entry(entry)
@@ -1685,11 +1758,19 @@ def analyze_document_zip(
     reference_file: tuple[str, bytes] | None = None,
     default_supplier: str = "",
     package_name: str = "",
+    *,
+    fast_mode: bool = True,
+    allow_ocr: bool = False,
 ) -> dict:
     if profile not in PROFILE_CHECKLISTS:
         raise ValueError(f"Perfil documental inválido: {profile}")
 
-    entries = _extract_package_documents(content, package_name)
+    entries = _extract_package_documents(
+        content,
+        package_name,
+        split_compound_pdfs=True,
+        split_only_likely_documents=fast_mode,
+    )
     winners = _parse_winners_report(reference_file)
     documents = []
     for entry in entries:
@@ -1698,6 +1779,7 @@ def analyze_document_zip(
         searchable_text, ocr_used = _extract_searchable_text(
             filename,
             entry["content"],
+            allow_ocr=allow_ocr,
         )
         identification = (
             _identification_from_split_filename(filename)
@@ -1850,6 +1932,8 @@ def analyze_document_zip(
         "ocr_candidates": sum(document["ocr_candidate"] for document in documents),
         "ocr_processed": sum(document["ocr_used"] for document in documents),
         "package_name": package_name,
+        "fast_mode": fast_mode,
+        "allow_ocr": allow_ocr,
     }
 
 
@@ -1865,6 +1949,8 @@ def build_organized_zip(
     extracted_entries = _extract_package_documents(
         content,
         analysis.get("package_name", ""),
+        split_compound_pdfs=True,
+        split_only_likely_documents=analysis.get("fast_mode", True),
     )
 
     with ZipFile(output_buffer, "w", ZIP_DEFLATED) as target:
@@ -1937,7 +2023,7 @@ def build_organized_zip(
                 desired_name = document["standardized_name"]
             elif document["identified"]:
                 folder = (
-                    f"{document['supplier']}/06 - Documentos Não Utilizados"
+                    f"{document['supplier']}/06 - Documentos Fora da Lista"
                 )
                 desired_name = document["name"]
             else:
