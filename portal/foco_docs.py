@@ -178,7 +178,15 @@ DOCUMENT_RULES = (
         "10.9.1",
         "Licença Sanitária",
         "TÉCNICOS",
-        ("licenca sanitaria", "licença sanitária", "licenca de funcionamento"),
+        (
+            "licenca sanitaria",
+            "licença sanitária",
+            "licenca de funcionamento",
+            "lic func",
+            "lic. func",
+            "alvara est",
+            "alvará est",
+        ),
     ),
     (
         "10.9.2",
@@ -191,6 +199,11 @@ DOCUMENT_RULES = (
             "aut. c-e-c",
             "aut c-e-c",
             "ae anvisa",
+            "aut func",
+            "aut. func",
+            "aut func federal",
+            "alv. fed",
+            "alv fed",
         ),
     ),
     (
@@ -200,6 +213,8 @@ DOCUMENT_RULES = (
         (
             "registro anvisa",
             "registro do produto",
+            "registos",
+            "registros_bulas",
             "publicacao dou",
             "publicação dou",
             "_rms",
@@ -509,6 +524,8 @@ def identify_document(filename: str, extracted_text: str = "") -> dict | None:
         keyword_match = any(
             normalize_text(keyword).strip() in normalized for keyword in keywords
         )
+        if label == "Registro ANVISA" and "bula" in normalized:
+            keyword_match = False
         if label == "AFE ANVISA":
             keyword_match = keyword_match or (
                 re.search(r"\b(?:afe|ae)\b", normalized) is not None
@@ -1611,14 +1628,14 @@ def _should_try_split_pdf(entry: dict, *, only_likely_documents: bool) -> bool:
             "registros",
             "documentos",
             "icismep",
+            "habilit",
         )
     )
     if likely_compound:
         return True
     if not only_likely_documents:
         return True
-    page_count = _pdf_page_count(entry["content"])
-    return page_count >= 12 and bool(re.search(r"\b(?:pe|pregao|processo|20\d{2}|38)\b", normalized_source))
+    return False
 
 
 def _expand_compound_pdf_entries(
@@ -1881,18 +1898,21 @@ def analyze_document_zip(
     )
     winners = _parse_winners_report(reference_file)
     session_reference_date = _coerce_date(session_date)
+    required_technical = set(
+        _required_technical_documents(technical_qualification)
+    )
     documents = []
     for entry in entries:
         filename = _safe_basename(entry["source"])
         suffix = PurePosixPath(filename).suffix.casefold()
         preliminary_identification = (
             _identification_from_split_filename(filename)
+            or identify_document(entry["source"], "")
             or identify_document(filename, "")
         )
-        can_skip_content = (
-            fast_mode
-            and preliminary_identification is not None
-            and not allow_ocr
+        can_skip_content = fast_mode and not allow_ocr and (
+            preliminary_identification is not None
+            or suffix in {".pdf", ".png", ".jpg", ".jpeg", ".tif", ".tiff"}
         )
         if can_skip_content:
             searchable_text, ocr_used = "", False
@@ -1912,6 +1932,35 @@ def analyze_document_zip(
             searchable_text,
             reference_date=session_reference_date,
         )
+        requirement = (
+            (identification["code"], identification["label"])
+            if identification
+            else ("", "")
+        )
+        is_potentially_required = bool(
+            identification
+            and (
+                identification["code"] in STANDARD_REQUIRED_CODES
+                or identification["code"] in CONDITIONAL_DOCUMENT_CODES
+                or requirement in required_technical
+            )
+        )
+        if (
+            can_skip_content
+            and is_potentially_required
+            and not validity["validity_date"]
+            and suffix == ".pdf"
+        ):
+            searchable_text, ocr_used = _extract_searchable_text(
+                filename,
+                entry["content"],
+                allow_ocr=False,
+            )
+            validity = _detect_validity(
+                filename,
+                searchable_text,
+                reference_date=session_reference_date,
+            )
         supplier = _supplier_from_source(
             entry["source"],
             winners,
@@ -1986,9 +2035,6 @@ def analyze_document_zip(
             }
         )
 
-    required_technical = set(
-        _required_technical_documents(technical_qualification)
-    )
     required_groups: dict[tuple[str, str, str], list[dict]] = {}
     for document in documents:
         if not document["identified"]:
