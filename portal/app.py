@@ -19,6 +19,7 @@ from portal.foco_docs import (
     supplier_label_from_package,
     tcu_validation_url,
 )
+from portal.portal_compras import build_process_search_url
 
 PORTAL_API_SECRET_NAME = "PORTAL_COMPRAS_API_KEY"
 
@@ -278,6 +279,50 @@ def reset_print_selection() -> None:
     st.session_state.pop("foco_docs_print_result", None)
     for group_index in range(7):
         st.session_state.pop(f"foco_docs_print_selection_{group_index}", None)
+
+
+def render_portal_search() -> None:
+    st.markdown(
+        """
+        <div class="foco-card">
+            <div class="foco-section-title">Procurar processo no Portal de Compras Públicas</div>
+            <div class="foco-section-note">
+                Informe o número do pregão e o órgão comprador para abrir a busca
+                do Portal já direcionada ao processo.
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    search_col1, search_col2 = st.columns([1, 1])
+    process_number = search_col1.text_input(
+        "Número do pregão",
+        placeholder="Ex.: 039/2026",
+        key="portal_process_number",
+    )
+    agency = search_col2.text_input(
+        "Órgão comprador",
+        value="ICISMEP",
+        key="portal_agency",
+    )
+    search_url = build_process_search_url(process_number, agency)
+    st.link_button(
+        "Abrir processo no Portal de Compras Públicas",
+        search_url,
+        use_container_width=True,
+        disabled=not process_number.strip(),
+    )
+    if portal_api_configured():
+        st.caption(
+            "API do Portal configurada com segurança. Para baixar documentos "
+            "automaticamente, ainda precisamos do endereço técnico da API de "
+            "processos/fornecedores/documentos."
+        )
+    else:
+        st.caption(
+            "Sem API documentada, a busca por link oficial fica disponível para "
+            "localizar o processo e baixar os documentos pelo Portal."
+        )
 
 
 def render_inputs() -> None:
@@ -720,6 +765,7 @@ def main() -> None:
             st.rerun()
 
     render_header()
+    render_portal_search()
     render_inputs()
     render_result()
 
