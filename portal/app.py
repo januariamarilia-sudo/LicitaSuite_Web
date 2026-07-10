@@ -611,15 +611,6 @@ def render_foco_docs() -> None:
             ),
             key="foco_docs_split_compound_pdfs",
         )
-        allow_ocr = st.checkbox(
-            "Usar OCR para PDFs escaneados",
-            value=False,
-            help=(
-                "É a opção mais demorada. Use somente quando os PDFs forem "
-                "imagem/escaneados e não forem reconhecidos."
-            ),
-            key="foco_docs_allow_ocr",
-        )
     upload_col1, upload_col2 = st.columns(2)
     uploaded_zip = upload_col1.file_uploader(
         "1. Pacote com as pastas dos fornecedores",
@@ -661,7 +652,7 @@ def render_foco_docs() -> None:
                 supplier_label_from_package(uploaded_zip.name),
                 uploaded_zip.name,
                 fast_mode=fast_mode,
-                allow_ocr=allow_ocr,
+                allow_ocr=False,
                 split_compound_pdfs=split_compound_pdfs,
                 read_internal_validity=read_internal_validity,
                 session_date=session_date,

@@ -5,7 +5,4 @@ pypdf
 openpyxl
 num2words
 rarfile
-pytesseract
-pymupdf
-pillow
 reportlab
