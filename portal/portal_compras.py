@@ -33,13 +33,14 @@ def _html_to_lines(html: str) -> list[str]:
 
 def extract_supplier_names_from_process_page(html: str) -> list[str]:
     lines = _html_to_lines(html)
-    try:
-        start = next(
-            index for index, line in enumerate(lines)
-            if line.casefold() == "fornecedores"
-        )
-    except StopIteration:
+    supplier_markers = [
+        index for index, line in enumerate(lines)
+        if line.casefold() == "fornecedores"
+    ]
+    if not supplier_markers:
         return []
+
+    start = supplier_markers[-1]
 
     end = len(lines)
     for index in range(start + 1, len(lines)):
@@ -48,11 +49,28 @@ def extract_supplier_names_from_process_page(html: str) -> list[str]:
             break
 
     ignored = {
+        "edital",
+        "edital.pdf",
+        "tipo:",
+        "tipo: documento",
+        "documento",
+        "documentos",
+        "relatorio",
+        "relatório",
+        "relatório de propostas",
+        "relatorio de propostas",
+        "ata de propostas",
+        "ata parcial",
+        "ata final",
+        "vencedores",
+        "ranking nos itens",
+        "propostas readequadas",
+        "pedidos de esclarecimento",
+        "pedidos de esclare...",
         "processo",
         "fornecedores",
         "baixar tudo",
         "buscar documento",
-        "documentos",
         "download concluído",
         "download concluido",
     }
@@ -62,13 +80,89 @@ def extract_supplier_names_from_process_page(html: str) -> list[str]:
         normalized = line.casefold().strip()
         if normalized in ignored:
             continue
+        if normalized.endswith(".pdf"):
+            continue
+        if " - " in line and any(char.isdigit() for char in line):
+            continue
         if normalized.isdigit():
             continue
         if len(line) < 4:
             continue
+        looks_like_supplier = any(
+            marker in normalized
+            for marker in (
+                "ltda",
+                "eireli",
+                "s/a",
+                " sa",
+                "comerc",
+                "distrib",
+                "farm",
+                "hospital",
+                "medic",
+                "produtos",
+                "industria",
+                "indústria",
+            )
+        ) or line.isupper()
+        if not looks_like_supplier:
+            continue
         if normalized.startswith("página") or normalized.startswith("pagina"):
             continue
         if normalized not in seen:
+            suppliers.append(line)
+            seen.add(normalized)
+    return suppliers
+
+
+def extract_supplier_names_from_text(text: str) -> list[str]:
+    lines = [
+        re.sub(r"\s+", " ", line).strip()
+        for line in (text or "").splitlines()
+        if re.sub(r"\s+", " ", line).strip()
+    ]
+    ignored_fragments = (
+        "baixar tudo",
+        "download conclu",
+        "item ",
+        "quantidade",
+        "valor de referência",
+        "valor de referencia",
+        "melhor lance",
+        "unidade",
+        "disputa",
+        "recebendo documentos",
+        "fornecedores",
+        "processo",
+        "documentos",
+    )
+    suppliers: list[str] = []
+    seen: set[str] = set()
+    for line in lines:
+        normalized = line.casefold()
+        if any(fragment in normalized for fragment in ignored_fragments):
+            continue
+        if len(line) < 4 or line.isdigit():
+            continue
+        looks_like_supplier = (
+            any(
+                marker in normalized
+                for marker in (
+                    "ltda",
+                    "eireli",
+                    "s/a",
+                    " sa",
+                    "comerc",
+                    "distrib",
+                    "farm",
+                    "hospital",
+                    "medic",
+                    "produtos",
+                )
+            )
+            or line.isupper()
+        )
+        if looks_like_supplier and normalized not in seen:
             suppliers.append(line)
             seen.add(normalized)
     return suppliers

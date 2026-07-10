@@ -23,6 +23,7 @@ from portal.foco_docs import (
 from portal.portal_compras import (
     build_process_search_url,
     fetch_supplier_names_from_process_url,
+    extract_supplier_names_from_text,
 )
 
 PORTAL_API_SECRET_NAME = "PORTAL_COMPRAS_API_KEY"
@@ -388,8 +389,9 @@ def render_portal_search() -> None:
                 st.success(f"{len(suppliers)} fornecedor(es) localizado(s) no link.")
             else:
                 st.warning(
-                    "Não consegui localizar fornecedores nesse link. "
-                    "Se preferir, envie a lista de itens vencidos no campo abaixo."
+                    "Não localizei fornecedores nesse link. Se a página estiver na "
+                    "aba de documentos do processo, abra/role até a aba Fornecedores "
+                    "no Portal ou cole abaixo a lista de fornecedores/itens vencidos."
                 )
         except Exception as exc:
             st.session_state.portal_suppliers_from_link = []
@@ -398,11 +400,39 @@ def render_portal_search() -> None:
                 st.code(f"{type(exc).__name__}: {exc}")
 
     suppliers_from_link = st.session_state.get("portal_suppliers_from_link", [])
-    if suppliers_from_link:
+    manual_supplier_text = st.text_area(
+        "Lista de fornecedores ou itens vencidos (opcional)",
+        placeholder=(
+            "Cole aqui a lista copiada do Portal, do relatório de vencedores "
+            "ou da lista de itens vencidos. Um fornecedor por linha ajuda mais."
+        ),
+        key="portal_manual_supplier_text",
+        help=(
+            "Use quando o link do Portal trouxer documentos do processo em vez "
+            "de fornecedores. O sistema tenta extrair os nomes das empresas."
+        ),
+    )
+    manual_suppliers = extract_supplier_names_from_text(manual_supplier_text)
+    if manual_suppliers:
+        st.session_state.portal_suppliers_from_manual = manual_suppliers
+        st.success(
+            f"{len(manual_suppliers)} fornecedor(es) localizado(s) na lista colada."
+        )
+
+    suppliers_from_manual = st.session_state.get("portal_suppliers_from_manual", [])
+    combined_suppliers = []
+    seen_suppliers = set()
+    for supplier in [*suppliers_from_link, *suppliers_from_manual]:
+        normalized = normalize_supplier_text(supplier)
+        if normalized and normalized not in seen_suppliers:
+            combined_suppliers.append(supplier)
+            seen_suppliers.add(normalized)
+
+    if combined_suppliers:
         st.multiselect(
             "Escolha quais fornecedores deseja separar",
-            suppliers_from_link,
-            default=suppliers_from_link,
+            combined_suppliers,
+            default=combined_suppliers,
             key="portal_selected_suppliers",
             help=(
                 "Quando você enviar o pacote documental, o ZIP final será filtrado "
