@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import sys
+import unicodedata
 
 import streamlit as st
 
@@ -19,7 +20,10 @@ from portal.foco_docs import (
     supplier_label_from_package,
     tcu_validation_url,
 )
-from portal.portal_compras import build_process_search_url
+from portal.portal_compras import (
+    build_process_search_url,
+    fetch_supplier_names_from_process_url,
+)
 
 PORTAL_API_SECRET_NAME = "PORTAL_COMPRAS_API_KEY"
 
@@ -30,6 +34,58 @@ def portal_api_configured() -> bool:
     except Exception:
         secret_value = ""
     return bool(secret_value or os.environ.get(PORTAL_API_SECRET_NAME, ""))
+
+
+def normalize_supplier_text(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", value or "")
+    normalized = "".join(char for char in normalized if not unicodedata.combining(char))
+    return " ".join(normalized.casefold().split())
+
+
+def supplier_is_selected(supplier: str, selected_suppliers: list[str]) -> bool:
+    if not selected_suppliers:
+        return True
+    supplier_normalized = normalize_supplier_text(supplier)
+    for selected in selected_suppliers:
+        selected_normalized = normalize_supplier_text(selected)
+        if selected_normalized and (
+            selected_normalized in supplier_normalized
+            or supplier_normalized in selected_normalized
+        ):
+            return True
+    return False
+
+
+def filter_analysis_by_suppliers(analysis: dict, selected_suppliers: list[str]) -> tuple[dict, int]:
+    if not selected_suppliers:
+        return analysis, len(analysis.get("documents", []))
+
+    filtered_documents = [
+        document
+        for document in analysis.get("documents", [])
+        if supplier_is_selected(document.get("supplier", ""), selected_suppliers)
+    ]
+    if not filtered_documents:
+        return analysis, 0
+
+    filtered_analysis = dict(analysis)
+    filtered_analysis["documents"] = filtered_documents
+    filtered_analysis["suppliers"] = sorted(
+        {document["supplier"] for document in filtered_documents}
+    )
+    filtered_analysis["supplier_cnpjs"] = {
+        supplier: cnpj
+        for supplier, cnpj in analysis.get("supplier_cnpjs", {}).items()
+        if supplier in filtered_analysis["suppliers"]
+    }
+    filtered_analysis["totals"] = {
+        "BÁSICOS": sum(doc["category"] == "BÁSICOS" for doc in filtered_documents),
+        "TÉCNICOS": sum(doc["category"] == "TÉCNICOS" for doc in filtered_documents),
+        "NÃO CLASSIFICADOS": sum(
+            doc["category"] == "NÃO CLASSIFICADOS" for doc in filtered_documents
+        ),
+    }
+    return filtered_analysis, len(filtered_documents)
 
 
 def inject_styles() -> None:
@@ -312,6 +368,47 @@ def render_portal_search() -> None:
         use_container_width=True,
         disabled=not process_number.strip(),
     )
+    portal_process_url = st.text_input(
+        "Ou cole o link público do processo",
+        placeholder="https://www.portaldecompraspublicas.com.br/processos/...",
+        key="portal_process_url",
+    )
+    if st.button(
+        "Puxar fornecedores do link",
+        use_container_width=True,
+        disabled=not portal_process_url.strip(),
+        key="portal_fetch_suppliers",
+    ):
+        try:
+            suppliers = fetch_supplier_names_from_process_url(
+                portal_process_url.strip()
+            )
+            st.session_state.portal_suppliers_from_link = suppliers
+            if suppliers:
+                st.success(f"{len(suppliers)} fornecedor(es) localizado(s) no link.")
+            else:
+                st.warning(
+                    "Não consegui localizar fornecedores nesse link. "
+                    "Se preferir, envie a lista de itens vencidos no campo abaixo."
+                )
+        except Exception as exc:
+            st.session_state.portal_suppliers_from_link = []
+            st.error("Não consegui ler os fornecedores pelo link informado.")
+            with st.expander("Detalhes"):
+                st.code(f"{type(exc).__name__}: {exc}")
+
+    suppliers_from_link = st.session_state.get("portal_suppliers_from_link", [])
+    if suppliers_from_link:
+        st.multiselect(
+            "Escolha quais fornecedores deseja separar",
+            suppliers_from_link,
+            default=suppliers_from_link,
+            key="portal_selected_suppliers",
+            help=(
+                "Quando você enviar o pacote documental, o ZIP final será filtrado "
+                "para estes fornecedores, quando os nomes das pastas/documentos baterem."
+            ),
+        )
     if portal_api_configured():
         st.caption(
             "API do Portal configurada com segurança. Para baixar documentos "
@@ -390,12 +487,13 @@ def render_inputs() -> None:
         key="foco_docs_upload",
     )
     winners_report = upload_col2.file_uploader(
-        "Documento do processo / vencedores (opcional)",
+        "Lista de itens vencidos / vencedores (opcional)",
         type=["pdf"],
         key="foco_docs_winners_report",
         help=(
-            "Pode ser Registro de Preço, relatório de vencedores ou documento "
-            "com itens vencidos. Ele entra no início da pasta organizada."
+            "Envie Registro de Preço, relatório de vencedores ou lista de itens "
+            "vencidos. O FOCO DOCS usa esse arquivo como referência para "
+            "fornecedores, propostas, catálogos e itens vencedores."
         ),
     )
 
@@ -430,6 +528,22 @@ def render_inputs() -> None:
             read_internal_validity=read_internal_validity,
             session_date=session_date,
         )
+        selected_suppliers = st.session_state.get("portal_selected_suppliers", [])
+        if selected_suppliers:
+            analysis, matched_documents = filter_analysis_by_suppliers(
+                analysis,
+                selected_suppliers,
+            )
+            if matched_documents:
+                st.info(
+                    "Resultado filtrado para os fornecedores selecionados no link "
+                    f"do Portal: {matched_documents} documento(s) mantido(s)."
+                )
+            else:
+                st.warning(
+                    "Os fornecedores selecionados no link não bateram com os nomes "
+                    "encontrados no pacote enviado. Mantive o processamento completo."
+                )
         progress.progress(75, text="Montando ZIP organizado...")
         organized_zip = build_organized_zip(source_bytes, analysis, reference_file)
         st.session_state.foco_docs_result = {
