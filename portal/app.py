@@ -374,8 +374,13 @@ def render_portal_search() -> None:
         placeholder="https://www.portaldecompraspublicas.com.br/processos/...",
         key="portal_process_url",
     )
+    st.caption(
+        "Observação: a aba Fornecedores do Portal é carregada dinamicamente. "
+        "Se o link não trouxer os nomes, abra a aba Fornecedores no Portal, "
+        "copie os nomes das empresas e cole no campo abaixo."
+    )
     if st.button(
-        "Puxar fornecedores do link",
+        "Tentar ler fornecedores do link",
         use_container_width=True,
         disabled=not portal_process_url.strip(),
         key="portal_fetch_suppliers",
