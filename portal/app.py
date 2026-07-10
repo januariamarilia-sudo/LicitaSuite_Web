@@ -592,15 +592,34 @@ def render_foco_docs() -> None:
         ),
         key="foco_docs_fast_mode",
     )
-    allow_ocr = st.checkbox(
-        "Usar OCR para PDFs escaneados (mais demorado)",
-        value=False,
-        help=(
-            "Ative apenas quando os documentos forem imagem/escaneados e não "
-            "forem reconhecidos no modo rápido."
-        ),
-        key="foco_docs_allow_ocr",
-    )
+    with st.expander("Opções de conferência profunda (mais demorado)", expanded=False):
+        read_internal_validity = st.checkbox(
+            "Buscar validade dentro dos PDFs quando não estiver no nome",
+            value=False,
+            help=(
+                "Desligado deixa mais rápido. Ligue apenas quando a validade "
+                "não vier no nome do arquivo e for indispensável."
+            ),
+            key="foco_docs_read_internal_validity",
+        )
+        split_compound_pdfs = st.checkbox(
+            "Separar PDF único com vários documentos",
+            value=False,
+            help=(
+                "Desligado é mais rápido. Ligue quando o fornecedor mandar "
+                "um PDF grande contendo contrato, certidões e proposta juntos."
+            ),
+            key="foco_docs_split_compound_pdfs",
+        )
+        allow_ocr = st.checkbox(
+            "Usar OCR para PDFs escaneados",
+            value=False,
+            help=(
+                "É a opção mais demorada. Use somente quando os PDFs forem "
+                "imagem/escaneados e não forem reconhecidos."
+            ),
+            key="foco_docs_allow_ocr",
+        )
     upload_col1, upload_col2 = st.columns(2)
     uploaded_zip = upload_col1.file_uploader(
         "1. Pacote com as pastas dos fornecedores",
@@ -643,6 +662,8 @@ def render_foco_docs() -> None:
                 uploaded_zip.name,
                 fast_mode=fast_mode,
                 allow_ocr=allow_ocr,
+                split_compound_pdfs=split_compound_pdfs,
+                read_internal_validity=read_internal_validity,
                 session_date=session_date,
             )
             progress.progress(
@@ -721,7 +742,6 @@ def render_foco_docs() -> None:
         st.dataframe(analysis["checklist"], use_container_width=True, hide_index=True)
     with tab_validation:
         validation_codes = {
-            "7.0.1",
             "10.7.1",
             "10.7.2",
             "10.7.3",

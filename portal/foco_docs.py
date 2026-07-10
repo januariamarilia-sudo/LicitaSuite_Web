@@ -39,6 +39,15 @@ STANDARD_REQUIRED_CODES = {
     "10.8.1",
 }
 MULTIPLE_DOCUMENT_CODES = {"10.6.1", "10.9.3"}
+INTERNAL_VALIDITY_CODES = {
+    "10.7.1",
+    "10.7.2",
+    "10.7.3",
+    "10.7.4",
+    "10.7.5",
+    "10.7.6",
+    "10.8.1",
+}
 
 DOCUMENT_RULES = (
     (
@@ -1076,7 +1085,7 @@ def _entries_from_analysis_or_package(content: bytes, analysis: dict) -> list[di
     return _extract_package_documents(
         content,
         analysis.get("package_name", ""),
-        split_compound_pdfs=True,
+        split_compound_pdfs=analysis.get("split_compound_pdfs", True),
         split_only_likely_documents=analysis.get("fast_mode", True),
     )
 
@@ -1885,6 +1894,8 @@ def analyze_document_zip(
     *,
     fast_mode: bool = True,
     allow_ocr: bool = False,
+    split_compound_pdfs: bool = True,
+    read_internal_validity: bool = True,
     session_date: date | str | None = None,
 ) -> dict:
     if profile not in PROFILE_CHECKLISTS:
@@ -1893,7 +1904,7 @@ def analyze_document_zip(
     entries = _extract_package_documents(
         content,
         package_name,
-        split_compound_pdfs=True,
+        split_compound_pdfs=split_compound_pdfs,
         split_only_likely_documents=fast_mode,
     )
     winners = _parse_winners_report(reference_file)
@@ -1932,6 +1943,14 @@ def analyze_document_zip(
             searchable_text,
             reference_date=session_reference_date,
         )
+        if (
+            not identification
+            or identification["code"] not in INTERNAL_VALIDITY_CODES
+        ):
+            validity = {
+                "validity_date": "",
+                "validity_status": "Não se aplica",
+            }
         requirement = (
             (identification["code"], identification["label"])
             if identification
@@ -1950,6 +1969,11 @@ def analyze_document_zip(
             and is_potentially_required
             and not validity["validity_date"]
             and suffix == ".pdf"
+            and read_internal_validity
+            and identification
+            and identification["code"] in INTERNAL_VALIDITY_CODES
+            and "sem val" not in normalize_text(filename)
+            and "s val" not in normalize_text(filename)
         ):
             searchable_text, ocr_used = _extract_searchable_text(
                 filename,
@@ -2104,6 +2128,8 @@ def analyze_document_zip(
         "package_name": package_name,
         "fast_mode": fast_mode,
         "allow_ocr": allow_ocr,
+        "split_compound_pdfs": split_compound_pdfs,
+        "read_internal_validity": read_internal_validity,
         "_entry_contents": {
             entry["source"]: entry["content"] for entry in entries
         },
