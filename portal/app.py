@@ -405,6 +405,11 @@ def render_portal_search() -> None:
                 st.code(f"{type(exc).__name__}: {exc}")
 
     suppliers_from_link = st.session_state.get("portal_suppliers_from_link", [])
+    st.info(
+        "Como usar: no Portal, abra a aba Fornecedores, copie os nomes das empresas "
+        "que aparecem na lista e cole abaixo. Depois selecione quais fornecedores "
+        "o FOCO DOCS deve separar."
+    )
     manual_supplier_text = st.text_area(
         "Lista de fornecedores ou itens vencidos (opcional)",
         placeholder=(
