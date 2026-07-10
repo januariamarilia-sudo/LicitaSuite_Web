@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import sys
 
@@ -19,41 +20,90 @@ from portal.foco_docs import (
     tcu_validation_url,
 )
 
+PORTAL_API_SECRET_NAME = "PORTAL_COMPRAS_API_KEY"
+
+
+def portal_api_configured() -> bool:
+    try:
+        secret_value = st.secrets.get(PORTAL_API_SECRET_NAME, "")
+    except Exception:
+        secret_value = ""
+    return bool(secret_value or os.environ.get(PORTAL_API_SECRET_NAME, ""))
+
 
 def inject_styles() -> None:
     st.markdown(
         """
         <style>
         :root {
-            --navy: #10213f;
-            --blue: #175cd3;
-            --blue-soft: #eef4ff;
+            --ink: #071a33;
+            --navy: #0b2347;
+            --navy-2: #12386f;
+            --blue: #1d5fd1;
+            --blue-soft: #eaf2ff;
+            --gold: #c99a42;
+            --gold-soft: #fff7e8;
             --green: #067647;
             --amber: #b54708;
-            --canvas: #f6f8fc;
-            --border: #d8dfeb;
+            --canvas: #f5f7fb;
+            --card: rgba(255,255,255,.88);
+            --border: rgba(130,148,176,.30);
             --muted: #667085;
+            --shadow: 0 24px 70px rgba(8, 30, 63, .12);
         }
         .stApp {
             background:
-                radial-gradient(circle at top left, rgba(23,92,211,.10), transparent 30rem),
+                radial-gradient(circle at 8% 5%, rgba(201,154,66,.22), transparent 24rem),
+                radial-gradient(circle at 92% 0%, rgba(29,95,209,.18), transparent 25rem),
                 linear-gradient(180deg, #fbfcff 0%, var(--canvas) 100%);
+            color: var(--ink);
+        }
+        .block-container {
+            max-width: 1240px;
+            padding-top: 2rem;
+            padding-bottom: 3rem;
         }
         section[data-testid="stSidebar"] {
-            background: linear-gradient(180deg, #10213f 0%, #132c55 100%);
+            background:
+                radial-gradient(circle at top, rgba(201,154,66,.28), transparent 14rem),
+                linear-gradient(180deg, #071a33 0%, #102a55 100%);
         }
         section[data-testid="stSidebar"] * {
             color: #ffffff !important;
         }
         .foco-hero {
-            border: 1px solid var(--border);
-            border-radius: 22px;
-            padding: 1.35rem 1.45rem;
-            background: rgba(255,255,255,.92);
-            box-shadow: 0 18px 45px rgba(16,33,63,.08);
-            margin-bottom: 1rem;
+            position: relative;
+            overflow: hidden;
+            border: 1px solid rgba(255,255,255,.70);
+            border-radius: 30px;
+            padding: 2rem 2.15rem;
+            background:
+                linear-gradient(135deg, rgba(255,255,255,.96) 0%, rgba(244,248,255,.92) 54%, rgba(255,247,232,.82) 100%);
+            box-shadow: var(--shadow);
+            margin-bottom: 1.05rem;
+        }
+        .foco-hero:before {
+            content: "";
+            position: absolute;
+            width: 18rem;
+            height: 18rem;
+            right: -7rem;
+            top: -8rem;
+            border-radius: 999px;
+            background: radial-gradient(circle, rgba(201,154,66,.36), transparent 65%);
+        }
+        .foco-hero:after {
+            content: "";
+            position: absolute;
+            width: 22rem;
+            height: 22rem;
+            right: 5rem;
+            bottom: -15rem;
+            border-radius: 999px;
+            background: radial-gradient(circle, rgba(29,95,209,.16), transparent 64%);
         }
         .foco-eyebrow {
+            position: relative;
             color: var(--blue);
             font-size: .78rem;
             font-weight: 800;
@@ -62,28 +112,122 @@ def inject_styles() -> None:
             margin-bottom: .25rem;
         }
         .foco-title {
+            position: relative;
             color: var(--navy);
-            font-size: 2rem;
+            font-size: clamp(2.25rem, 4vw, 4.1rem);
             line-height: 1.05;
-            font-weight: 850;
+            font-weight: 900;
             margin: 0;
+            letter-spacing: -.055em;
         }
         .foco-subtitle {
+            position: relative;
             color: var(--muted);
-            font-size: .98rem;
-            margin-top: .45rem;
-            max-width: 58rem;
+            font-size: 1.03rem;
+            margin-top: .6rem;
+            max-width: 48rem;
+            line-height: 1.65;
+        }
+        .foco-badges {
+            position: relative;
+            display: flex;
+            gap: .55rem;
+            flex-wrap: wrap;
+            margin-top: 1.1rem;
+        }
+        .foco-badge {
+            border: 1px solid rgba(29,95,209,.16);
+            border-radius: 999px;
+            background: rgba(255,255,255,.74);
+            color: var(--navy);
+            font-size: .78rem;
+            font-weight: 800;
+            padding: .42rem .72rem;
+            box-shadow: 0 10px 25px rgba(16,33,63,.06);
+        }
+        .foco-card {
+            border: 1px solid var(--border);
+            border-radius: 22px;
+            padding: 1.15rem 1.25rem;
+            background: var(--card);
+            box-shadow: 0 14px 45px rgba(8,30,63,.08);
+            margin: 1rem 0;
+        }
+        .foco-section-title {
+            color: var(--navy);
+            font-size: 1.1rem;
+            font-weight: 900;
+            margin: 0 0 .25rem 0;
+        }
+        .foco-section-note {
+            color: var(--muted);
+            line-height: 1.55;
+            margin-bottom: .8rem;
+        }
+        .foco-steps {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: .85rem;
+            margin: .9rem 0 1.1rem;
+        }
+        .foco-step {
+            border: 1px solid rgba(130,148,176,.24);
+            border-radius: 18px;
+            background: rgba(255,255,255,.78);
+            padding: .9rem .95rem;
+        }
+        .foco-step-number {
+            color: var(--gold);
+            font-weight: 900;
+            font-size: .82rem;
+            letter-spacing: .08em;
+            text-transform: uppercase;
+        }
+        .foco-step-title {
+            color: var(--navy);
+            font-weight: 850;
+            margin-top: .25rem;
+        }
+        .foco-step-text {
+            color: var(--muted);
+            font-size: .84rem;
+            line-height: 1.45;
+            margin-top: .2rem;
         }
         .stButton > button,
         .stDownloadButton > button {
-            border-radius: 12px;
+            border-radius: 14px;
             font-weight: 750;
+            min-height: 2.9rem;
+            box-shadow: 0 10px 24px rgba(29,95,209,.14);
+        }
+        .stButton > button[kind="primary"] {
+            background: linear-gradient(135deg, var(--blue) 0%, var(--navy-2) 100%);
+            border: 0;
         }
         div[data-testid="stMetric"] {
-            background: rgba(255,255,255,.88);
+            background: rgba(255,255,255,.92);
             border: 1px solid var(--border);
-            border-radius: 16px;
-            padding: .85rem 1rem;
+            border-radius: 20px;
+            padding: 1rem 1.05rem;
+            box-shadow: 0 12px 34px rgba(8,30,63,.07);
+        }
+        div[data-testid="stFileUploader"] {
+            border: 1px dashed rgba(29,95,209,.32);
+            border-radius: 20px;
+            background: rgba(234,242,255,.46);
+            padding: .45rem .75rem .75rem;
+        }
+        div[data-testid="stTabs"] button {
+            font-weight: 800;
+        }
+        @media (max-width: 820px) {
+            .foco-steps {
+                grid-template-columns: 1fr;
+            }
+            .foco-hero {
+                padding: 1.45rem;
+            }
         }
         </style>
         """,
@@ -99,7 +243,30 @@ def render_header() -> None:
             <h1 class="foco-title">FOCO DOCS</h1>
             <div class="foco-subtitle">
                 Aplicativo exclusivo para separar, reconhecer, renomear e baixar
-                documentos de fornecedores organizados por pasta.
+                documentos de fornecedores com agilidade, elegância e rastreio de conferência.
+            </div>
+            <div class="foco-badges">
+                <span class="foco-badge">Modo rápido</span>
+                <span class="foco-badge">Pastas por fornecedor</span>
+                <span class="foco-badge">Validade essencial</span>
+                <span class="foco-badge">Download organizado</span>
+            </div>
+        </div>
+        <div class="foco-steps">
+            <div class="foco-step">
+                <div class="foco-step-number">Passo 01</div>
+                <div class="foco-step-title">Enviar pacote</div>
+                <div class="foco-step-text">Anexe o ZIP/RAR/TAR com os documentos dos fornecedores.</div>
+            </div>
+            <div class="foco-step">
+                <div class="foco-step-number">Passo 02</div>
+                <div class="foco-step-title">Separar e renomear</div>
+                <div class="foco-step-text">O sistema identifica os documentos exigidos e organiza o restante.</div>
+            </div>
+            <div class="foco-step">
+                <div class="foco-step-number">Passo 03</div>
+                <div class="foco-step-title">Baixar pronto</div>
+                <div class="foco-step-text">Receba um ZIP final com pastas, nomes padronizados e conferência.</div>
             </div>
         </div>
         """,
@@ -114,7 +281,19 @@ def reset_print_selection() -> None:
 
 
 def render_inputs() -> None:
-    st.markdown("### 1. Envie o pacote documental")
+    st.markdown(
+        """
+        <div class="foco-card">
+            <div class="foco-section-title">1. Envie o pacote documental</div>
+            <div class="foco-section-note">
+                Use um ZIP/RAR/TAR com os documentos dos fornecedores. O modo padrão é
+                rápido: prioriza o nome do arquivo, separa o que está na lista exigida
+                e envia o restante para pastas de apoio.
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
     st.caption(
         "Use um ZIP/RAR/TAR com os documentos dos fornecedores. O modo padrão é "
         "rápido: ele prioriza nome do arquivo, separa o que está na lista exigida "
@@ -467,6 +646,18 @@ def render_documents_tab(result: dict) -> None:
 def render_result() -> None:
     result = st.session_state.get("foco_docs_result")
     if not result:
+        st.markdown(
+            """
+            <div class="foco-card">
+                <div class="foco-section-title">Resultado final</div>
+                <div class="foco-section-note">
+                    Depois do processamento, você baixará um ZIP com os fornecedores
+                    organizados em pastas e os documentos renomeados pelo item do edital.
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
         st.info(
             "Depois do processamento, você baixará um ZIP com os fornecedores "
             "organizados em pastas e os documentos renomeados."
@@ -518,6 +709,11 @@ def main() -> None:
     with st.sidebar:
         st.markdown("### FOCO DOCS")
         st.caption("Aplicativo exclusivo para separar documentos.")
+        if portal_api_configured():
+            st.success("API do Portal configurada com segurança.")
+        else:
+            st.warning("API do Portal ainda não configurada nos Secrets.")
+            st.caption("Use o nome PORTAL_COMPRAS_API_KEY.")
         if st.button("Limpar resultado", use_container_width=True):
             st.session_state.pop("foco_docs_result", None)
             reset_print_selection()
