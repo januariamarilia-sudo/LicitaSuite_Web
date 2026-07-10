@@ -2,7 +2,5 @@ streamlit
 python-docx
 pdfplumber
 pypdf
-openpyxl
-num2words
 rarfile
 reportlab
