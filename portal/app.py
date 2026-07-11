@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
 import sys
-import unicodedata
 
 import streamlit as st
 
@@ -20,73 +18,53 @@ from portal.foco_docs import (
     supplier_label_from_package,
     tcu_validation_url,
 )
-from portal.portal_compras import (
-    build_process_search_url,
-    fetch_supplier_names_from_process_url,
-    extract_supplier_names_from_text,
+
+DOCUMENT_GROUPS = (
+    "Documentos iniciais",
+    "Habilitação jurídica",
+    "Regularidade fiscal",
+    "Regularidade trabalhista",
+    "Qualificação econômico-financeira",
+    "Qualificação técnica",
+    "Outros documentos",
 )
 
-PORTAL_API_SECRET_NAME = "PORTAL_COMPRAS_API_KEY"
 
+def document_group_for_display(document: dict) -> str:
+    """Keep the tabs stable even when an older cached result has a variant group name."""
+    group = document.get("document_group", "")
+    if group in DOCUMENT_GROUPS:
+        return group
 
-def portal_api_configured() -> bool:
-    try:
-        secret_value = st.secrets.get(PORTAL_API_SECRET_NAME, "")
-    except Exception:
-        secret_value = ""
-    return bool(secret_value or os.environ.get(PORTAL_API_SECRET_NAME, ""))
+    code = document.get("document_code", "")
+    if code.startswith("7.0"):
+        return "Documentos iniciais"
+    if code.startswith(("10.6", "7.1")):
+        return "Habilitação jurídica"
+    if code in {"10.7.6", "7.2.6"}:
+        return "Regularidade trabalhista"
+    if code.startswith(("10.7", "7.2")):
+        return "Regularidade fiscal"
+    if code.startswith(("10.8", "7.3")):
+        return "Qualificação econômico-financeira"
+    if code.startswith("10.9"):
+        return "Qualificação técnica"
 
+    normalized_group = " ".join(str(group).casefold().split())
+    if "jur" in normalized_group:
+        return "Habilitação jurídica"
+    if "trabalh" in normalized_group:
+        return "Regularidade trabalhista"
+    if "fiscal" in normalized_group:
+        return "Regularidade fiscal"
+    if "econ" in normalized_group or "financeir" in normalized_group:
+        return "Qualificação econômico-financeira"
+    if "técnic" in normalized_group or "tecnic" in normalized_group:
+        return "Qualificação técnica"
+    if "inicia" in normalized_group:
+        return "Documentos iniciais"
 
-def normalize_supplier_text(value: str) -> str:
-    normalized = unicodedata.normalize("NFKD", value or "")
-    normalized = "".join(char for char in normalized if not unicodedata.combining(char))
-    return " ".join(normalized.casefold().split())
-
-
-def supplier_is_selected(supplier: str, selected_suppliers: list[str]) -> bool:
-    if not selected_suppliers:
-        return True
-    supplier_normalized = normalize_supplier_text(supplier)
-    for selected in selected_suppliers:
-        selected_normalized = normalize_supplier_text(selected)
-        if selected_normalized and (
-            selected_normalized in supplier_normalized
-            or supplier_normalized in selected_normalized
-        ):
-            return True
-    return False
-
-
-def filter_analysis_by_suppliers(analysis: dict, selected_suppliers: list[str]) -> tuple[dict, int]:
-    if not selected_suppliers:
-        return analysis, len(analysis.get("documents", []))
-
-    filtered_documents = [
-        document
-        for document in analysis.get("documents", [])
-        if supplier_is_selected(document.get("supplier", ""), selected_suppliers)
-    ]
-    if not filtered_documents:
-        return analysis, 0
-
-    filtered_analysis = dict(analysis)
-    filtered_analysis["documents"] = filtered_documents
-    filtered_analysis["suppliers"] = sorted(
-        {document["supplier"] for document in filtered_documents}
-    )
-    filtered_analysis["supplier_cnpjs"] = {
-        supplier: cnpj
-        for supplier, cnpj in analysis.get("supplier_cnpjs", {}).items()
-        if supplier in filtered_analysis["suppliers"]
-    }
-    filtered_analysis["totals"] = {
-        "BÁSICOS": sum(doc["category"] == "BÁSICOS" for doc in filtered_documents),
-        "TÉCNICOS": sum(doc["category"] == "TÉCNICOS" for doc in filtered_documents),
-        "NÃO CLASSIFICADOS": sum(
-            doc["category"] == "NÃO CLASSIFICADOS" for doc in filtered_documents
-        ),
-    }
-    return filtered_analysis, len(filtered_documents)
+    return "Outros documentos"
 
 
 def inject_styles() -> None:
@@ -338,130 +316,6 @@ def reset_print_selection() -> None:
         st.session_state.pop(f"foco_docs_print_selection_{group_index}", None)
 
 
-def render_portal_search() -> None:
-    st.markdown(
-        """
-        <div class="foco-card">
-            <div class="foco-section-title">Procurar processo no Portal de Compras Públicas</div>
-            <div class="foco-section-note">
-                Informe o número do pregão e o órgão comprador para abrir a busca
-                do Portal já direcionada ao processo.
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-    search_col1, search_col2 = st.columns([1, 1])
-    process_number = search_col1.text_input(
-        "Número do pregão",
-        placeholder="Ex.: 039/2026",
-        key="portal_process_number",
-    )
-    agency = search_col2.text_input(
-        "Órgão comprador",
-        value="ICISMEP",
-        key="portal_agency",
-    )
-    search_url = build_process_search_url(process_number, agency)
-    st.link_button(
-        "Abrir processo no Portal de Compras Públicas",
-        search_url,
-        use_container_width=True,
-        disabled=not process_number.strip(),
-    )
-    portal_process_url = st.text_input(
-        "Ou cole o link público do processo",
-        placeholder="https://www.portaldecompraspublicas.com.br/processos/...",
-        key="portal_process_url",
-    )
-    st.caption(
-        "Observação: a aba Fornecedores do Portal é carregada dinamicamente. "
-        "Se o link não trouxer os nomes, abra a aba Fornecedores no Portal, "
-        "copie os nomes das empresas e cole no campo abaixo."
-    )
-    if st.button(
-        "Tentar ler fornecedores do link",
-        use_container_width=True,
-        disabled=not portal_process_url.strip(),
-        key="portal_fetch_suppliers",
-    ):
-        try:
-            suppliers = fetch_supplier_names_from_process_url(
-                portal_process_url.strip()
-            )
-            st.session_state.portal_suppliers_from_link = suppliers
-            if suppliers:
-                st.success(f"{len(suppliers)} fornecedor(es) localizado(s) no link.")
-            else:
-                st.warning(
-                    "Não localizei fornecedores nesse link. Se a página estiver na "
-                    "aba de documentos do processo, abra/role até a aba Fornecedores "
-                    "no Portal ou cole abaixo a lista de fornecedores/itens vencidos."
-                )
-        except Exception as exc:
-            st.session_state.portal_suppliers_from_link = []
-            st.error("Não consegui ler os fornecedores pelo link informado.")
-            with st.expander("Detalhes"):
-                st.code(f"{type(exc).__name__}: {exc}")
-
-    suppliers_from_link = st.session_state.get("portal_suppliers_from_link", [])
-    st.info(
-        "Como usar: no Portal, abra a aba Fornecedores, copie os nomes das empresas "
-        "que aparecem na lista e cole abaixo. Depois selecione quais fornecedores "
-        "o FOCO DOCS deve separar."
-    )
-    manual_supplier_text = st.text_area(
-        "Lista de fornecedores ou itens vencidos (opcional)",
-        placeholder=(
-            "Cole aqui a lista copiada do Portal, do relatório de vencedores "
-            "ou da lista de itens vencidos. Um fornecedor por linha ajuda mais."
-        ),
-        key="portal_manual_supplier_text",
-        help=(
-            "Use quando o link do Portal trouxer documentos do processo em vez "
-            "de fornecedores. O sistema tenta extrair os nomes das empresas."
-        ),
-    )
-    manual_suppliers = extract_supplier_names_from_text(manual_supplier_text)
-    if manual_suppliers:
-        st.session_state.portal_suppliers_from_manual = manual_suppliers
-        st.success(
-            f"{len(manual_suppliers)} fornecedor(es) localizado(s) na lista colada."
-        )
-
-    suppliers_from_manual = st.session_state.get("portal_suppliers_from_manual", [])
-    combined_suppliers = []
-    seen_suppliers = set()
-    for supplier in [*suppliers_from_link, *suppliers_from_manual]:
-        normalized = normalize_supplier_text(supplier)
-        if normalized and normalized not in seen_suppliers:
-            combined_suppliers.append(supplier)
-            seen_suppliers.add(normalized)
-
-    if combined_suppliers:
-        st.multiselect(
-            "Escolha quais fornecedores deseja separar",
-            combined_suppliers,
-            default=combined_suppliers,
-            key="portal_selected_suppliers",
-            help=(
-                "Quando você enviar o pacote documental, o ZIP final será filtrado "
-                "para estes fornecedores, quando os nomes das pastas/documentos baterem."
-            ),
-        )
-    if portal_api_configured():
-        st.caption(
-            "API do Portal configurada com segurança. Para baixar documentos "
-            "automaticamente, ainda precisamos do endereço técnico da API de "
-            "processos/fornecedores/documentos."
-        )
-    else:
-        st.caption(
-            "Sem API documentada, a busca por link oficial fica disponível para "
-            "localizar o processo e baixar os documentos pelo Portal."
-        )
-
-
 def render_inputs() -> None:
     st.markdown(
         """
@@ -568,22 +422,6 @@ def render_inputs() -> None:
             read_internal_validity=read_internal_validity,
             session_date=session_date,
         )
-        selected_suppliers = st.session_state.get("portal_selected_suppliers", [])
-        if selected_suppliers:
-            analysis, matched_documents = filter_analysis_by_suppliers(
-                analysis,
-                selected_suppliers,
-            )
-            if matched_documents:
-                st.info(
-                    "Resultado filtrado para os fornecedores selecionados no link "
-                    f"do Portal: {matched_documents} documento(s) mantido(s)."
-                )
-            else:
-                st.warning(
-                    "Os fornecedores selecionados no link não bateram com os nomes "
-                    "encontrados no pacote enviado. Mantive o processamento completo."
-                )
         progress.progress(75, text="Montando ZIP organizado...")
         organized_zip = build_organized_zip(source_bytes, analysis, reference_file)
         st.session_state.foco_docs_result = {
@@ -707,7 +545,7 @@ def document_rows(analysis: dict) -> list[dict]:
         {
             "Selecionar": False,
             "ID": document["source"],
-            "Grupo": document["document_group"],
+            "Grupo": document_group_for_display(document),
             "Fornecedor": document["supplier"],
             "Arquivo original": document["name"],
             "Nome organizado": document["standardized_name"],
@@ -734,15 +572,7 @@ def render_documents_tab(result: dict) -> None:
         st.info("Nenhum PDF localizado para seleção/impressão.")
         return
 
-    group_names = (
-        "Documentos iniciais",
-        "Habilitação jurídica",
-        "Regularidade fiscal",
-        "Regularidade trabalhista",
-        "Qualificação econômico-financeira",
-        "Qualificação técnica",
-        "Outros documentos",
-    )
+    group_names = DOCUMENT_GROUPS
     group_tabs = st.tabs(group_names)
     selected_sources: list[str] = []
     for group_index, (group_name, group_tab) in enumerate(zip(group_names, group_tabs)):
@@ -908,18 +738,12 @@ def main() -> None:
     with st.sidebar:
         st.markdown("### FOCO DOCS")
         st.caption("Aplicativo exclusivo para separar documentos.")
-        if portal_api_configured():
-            st.success("API do Portal configurada com segurança.")
-        else:
-            st.warning("API do Portal ainda não configurada nos Secrets.")
-            st.caption("Use o nome PORTAL_COMPRAS_API_KEY.")
         if st.button("Limpar resultado", use_container_width=True):
             st.session_state.pop("foco_docs_result", None)
             reset_print_selection()
             st.rerun()
 
     render_header()
-    render_portal_search()
     render_inputs()
     render_result()
 
