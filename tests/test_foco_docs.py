@@ -241,3 +241,34 @@ def test_foco_docs_identifies_municipal_positive_certificate_by_content():
     document = identify_document("Certidao positiva Toledo.pdf", text)
 
     assert document["code"] == "10.7.4"
+
+
+def test_foco_docs_accepts_positive_certificates_with_negative_effect():
+    federal = identify_document(
+        "CND Federal.pdf",
+        """
+        Receita Federal do Brasil
+        Procuradoria-Geral da Fazenda Nacional
+        Certidão Positiva com efeito de negativa
+        créditos tributários federais e dívida ativa da união
+        """,
+    )
+    estadual = identify_document(
+        "CND Estadual.pdf",
+        """
+        Secretaria de Estado da Fazenda
+        Certidão Positiva com efeito de negativa
+        débitos estaduais
+        """,
+    )
+    trabalhista = identify_document(
+        "CNDT.pdf",
+        """
+        Justiça do Trabalho
+        Certidão positiva de débitos trabalhistas com efeito de negativa
+        """,
+    )
+
+    assert federal["code"] == "10.7.2"
+    assert estadual["code"] == "10.7.3"
+    assert trabalhista["code"] == "10.7.6"

@@ -118,6 +118,7 @@ DOCUMENT_RULES = (
             "receita federal",
             "cnd federal",
             "cnd unificada",
+            "positiva com efeito de negativa federal",
         ),
     ),
     (
@@ -129,6 +130,7 @@ DOCUMENT_RULES = (
             "certidão estadual",
             "fazenda estadual",
             "cnd estadual",
+            "positiva com efeito de negativa estadual",
         ),
     ),
     (
@@ -173,6 +175,7 @@ DOCUMENT_RULES = (
             "debitos trabalhistas",
             "débitos trabalhistas",
             "cnd trabalhista",
+            "positiva com efeito de negativa trabalhista",
         ),
     ),
     (
@@ -325,6 +328,11 @@ CONTENT_RULES = (
         (
             ("debitos relativos a creditos tributarios federais",),
             ("divida ativa da uniao", "certidao"),
+            ("receita federal", "positiva com efeito de negativa"),
+            ("procuradoria-geral da fazenda nacional", "positiva com efeito de negativa"),
+            ("tributos federais", "positiva com efeito de negativa"),
+            ("creditos tributarios federais", "efeito de negativa"),
+            ("divida ativa da uniao", "efeito de negativa"),
         ),
     ),
     (
@@ -334,6 +342,10 @@ CONTENT_RULES = (
         (
             ("certidao", "fazenda estadual"),
             ("certidao", "secretaria de estado da fazenda"),
+            ("fazenda estadual", "positiva com efeito de negativa"),
+            ("secretaria de estado da fazenda", "efeito de negativa"),
+            ("debitos estaduais", "efeito de negativa"),
+            ("tributos estaduais", "certidao"),
         ),
     ),
     (
@@ -367,7 +379,13 @@ CONTENT_RULES = (
         "10.7.6",
         "Certidão Negativa de Débitos Trabalhistas",
         "BÁSICOS",
-        (("certidao negativa de debitos trabalhistas",),),
+        (
+            ("certidao negativa de debitos trabalhistas",),
+            ("certidao positiva de debitos trabalhistas", "efeito de negativa"),
+            ("debitos trabalhistas", "efeito de negativa"),
+            ("trabalhistas", "efeito de negativa"),
+            ("justica do trabalho", "positiva com efeito de negativa"),
+        ),
     ),
     (
         "10.8.1",
