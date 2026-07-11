@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from pathlib import Path
 import sys
 
@@ -573,13 +574,36 @@ def render_documents_tab(result: dict) -> None:
         return
 
     group_names = DOCUMENT_GROUPS
-    group_tabs = st.tabs(group_names)
+    group_counts = Counter(row["Grupo"] for row in rows)
+    groups_with_documents = [
+        f"{group_name} ({group_counts[group_name]})"
+        for group_name in group_names
+        if group_counts[group_name]
+    ]
+    if groups_with_documents:
+        st.info(
+            "Documentos separados nas abas: "
+            + " • ".join(groups_with_documents)
+        )
+
+    tab_labels = [
+        f"{group_name} ({group_counts[group_name]})"
+        for group_name in group_names
+    ]
+    group_tabs = st.tabs(tab_labels)
     selected_sources: list[str] = []
     for group_index, (group_name, group_tab) in enumerate(zip(group_names, group_tabs)):
         with group_tab:
             group_rows = [row for row in rows if row["Grupo"] == group_name]
             if not group_rows:
-                st.caption("Nenhum documento localizado neste grupo.")
+                if groups_with_documents:
+                    st.caption(
+                        "Nenhum documento localizado neste grupo. "
+                        "Neste pacote há documentos em: "
+                        + " • ".join(groups_with_documents)
+                    )
+                else:
+                    st.caption("Nenhum documento localizado neste grupo.")
                 continue
             edited_documents = st.data_editor(
                 group_rows,
