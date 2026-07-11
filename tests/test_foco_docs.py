@@ -9,6 +9,7 @@ from portal.foco_docs import (
     build_organized_zip,
     build_print_pdf,
     document_validation,
+    identify_document,
 )
 
 
@@ -225,3 +226,18 @@ def test_foco_docs_uses_official_regional_validation_url_from_document():
     assert url == "https://www.fazenda.mg.gov.br/validar"
     assert "localizado no documento" in note
     assert "12.345.678/0001-99" in data
+
+
+def test_foco_docs_identifies_municipal_positive_certificate_by_content():
+    text = """
+    MUNICÍPIO DE TOLEDO
+    ESTADO DO PARANÁ
+    Certidão Positiva com efeito de negativa 42557/2026
+    Fica ressalvado o direito da Fazenda Municipal cobrar débitos municipais.
+    VALIDADE: 31/07/2026
+    INSCRIÇÃO EMPRESA
+    """
+
+    document = identify_document("Certidao positiva Toledo.pdf", text)
+
+    assert document["code"] == "10.7.4"
