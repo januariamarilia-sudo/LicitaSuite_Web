@@ -154,9 +154,7 @@ def render_header():
     st.markdown('<header class="ls-header">', unsafe_allow_html=True)
 
     if LOGO_PATH.exists():
-        st.markdown('<div class="ls-logo">', unsafe_allow_html=True)
         st.image(str(LOGO_PATH))
-        st.markdown("</div>", unsafe_allow_html=True)
     else:
         st.markdown(
             '<div class="ls-logo" style="font-size:28px;font-weight:900;color:#073F9E;">ICISMEP CL</div>',

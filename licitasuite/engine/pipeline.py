@@ -46,8 +46,10 @@ class Pipeline:
             else:
                 messages.append("Banco de fornecedores: não enviado")
 
-            apendice = AppendixParser().parse(detected.apendice)
+            appendix_parser = AppendixParser()
+            apendice = appendix_parser.parse(detected.apendice)
             fornecedores = PdfWinnersParser().parse(detected.vencedores_pdf)
+            messages.extend(appendix_parser.diagnostics)
             messages.append(f"Itens no Apêndice: {len(apendice)}")
             messages.append(f"Fornecedores reais identificados: {len(fornecedores)}")
 

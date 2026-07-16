@@ -1,5 +1,6 @@
 from pathlib import Path
 from docx import Document
+from licitasuite.parsers.text_utils import normalize_text
 
 class DetectedFiles:
     def __init__(self, modelo_ata=None, apendice=None, vencedores_pdf=None, banco_fornecedores=None):
@@ -31,17 +32,19 @@ class FileDetector:
         modelo = None
 
         for docx in docs:
-            name = docx.name.lower()
-            if "apendice" in name or "apêndice" in name:
+            name = normalize_text(docx.name)
+            if "APENDICE" in name:
                 apendice = docx
                 continue
+            if not modelo and ("ATA" in name or "REGISTRO DE PRECOS" in name):
+                modelo = docx
             try:
                 doc = Document(docx)
-                text = "\n".join(p.text for p in doc.paragraphs[:30]).upper()
-                table_text = " ".join(cell.text for t in doc.tables[:1] for r in t.rows[:2] for cell in r.cells).upper() if doc.tables else ""
-                if "APÊNDICE" in text or "APENDICE" in text or ("CÓD" in table_text and "MUNIC" in table_text):
+                text = normalize_text("\n".join(p.text for p in doc.paragraphs[:30]))
+                table_text = normalize_text(" ".join(cell.text for t in doc.tables[:1] for r in t.rows[:2] for cell in r.cells)) if doc.tables else ""
+                if not apendice and ("APENDICE" in text or ("COD" in table_text and "MUNIC" in table_text)):
                     apendice = docx
-                elif "ATA DE REGISTRO DE PREÇOS" in text or "PROCESSO LICITATÓRIO" in text:
+                elif not modelo and ("ATA DE REGISTRO DE PRECOS" in text or "PROCESSO LICITATORIO" in text):
                     modelo = docx
             except Exception:
                 pass
