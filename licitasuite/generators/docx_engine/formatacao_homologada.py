@@ -64,6 +64,27 @@ def _run(paragraph, text: str, bold: bool = False, size: int = 11):
     return r
 
 
+def _paragraph_has_numbering(paragraph) -> bool:
+    ppr = paragraph._p.pPr
+    if ppr is not None and ppr.numPr is not None:
+        return True
+
+    style = getattr(paragraph, "style", None)
+    while style is not None:
+        element = getattr(style, "_element", None)
+        style_ppr = getattr(element, "pPr", None)
+        if style_ppr is not None and style_ppr.numPr is not None:
+            return True
+        style = getattr(style, "base_style", None)
+
+    return False
+
+
+def _set_paragraph_plain_text(paragraph, text: str):
+    _limpar_paragrafo(paragraph)
+    _run(paragraph, text, False)
+
+
 def _set_run(run, bold: bool = False, size: int = 11):
     run.bold = bool(bold)
     run.font.name = "Arial"
@@ -455,6 +476,23 @@ def formatar_quantidade_clausula_4(document: Document):
                 _set_cell_text(cell, novo, size=8, bold=False, center=True)
 
 
+def corrigir_duplicidade_numeracao_42(document: Document):
+    for p in document.paragraphs:
+        txt = (p.text or "").strip()
+        if "Valor total dos preços registrados" not in txt:
+            continue
+
+        novo = re.sub(r"^4\.2\s+4\.2\s+", "4.2 ", txt, count=1)
+        if novo != txt:
+            _set_paragraph_plain_text(p, novo)
+            continue
+
+        if _paragraph_has_numbering(p):
+            novo = re.sub(r"^4\.2\s+", "", txt, count=1)
+            if novo != txt:
+                _set_paragraph_plain_text(p, novo)
+
+
 def formatar_assinaturas(document: Document, ata: Any, cadastro: dict[str, str] | None = None):
     empresa = _cadastro_get(cadastro, "FORNECEDOR", "RAZÃO SOCIAL", "RAZAO SOCIAL") or _ata_empresa(ata)
     representante = _cadastro_get(cadastro, "REPRESENTANTE") or _ata_representante(ata)
@@ -495,6 +533,7 @@ def aplicar_formatacao_homologada(docx_path: str | Path, ata: Any, cadastro: dic
 
     formatar_preambulo(document, ata, cadastro)
     formatar_quantidade_clausula_4(document)
+    corrigir_duplicidade_numeracao_42(document)
     formatar_assinaturas(document, ata, cadastro)
 
     document.save(docx_path)

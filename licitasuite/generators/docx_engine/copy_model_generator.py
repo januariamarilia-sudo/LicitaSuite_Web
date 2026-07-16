@@ -322,7 +322,18 @@ class CopyModelAtaGenerator:
 
     def paragraph_has_numbering(self, p):
         ppr = p._p.pPr
-        return bool(ppr is not None and ppr.numPr is not None)
+        if ppr is not None and ppr.numPr is not None:
+            return True
+
+        style = getattr(p, "style", None)
+        while style is not None:
+            element = getattr(style, "_element", None)
+            style_ppr = getattr(element, "pPr", None)
+            if style_ppr is not None and style_ppr.numPr is not None:
+                return True
+            style = getattr(style, "base_style", None)
+
+        return False
 
     # ------------------- APÊNDICE -------------------
     def replace_appendix(self, doc, ata):
