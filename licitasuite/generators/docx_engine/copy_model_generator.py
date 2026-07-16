@@ -313,11 +313,16 @@ class CopyModelAtaGenerator:
             self.set_cell_text_keep_style(cells[-1], format_money(total, 2))
 
     def replace_total_paragraph(self, doc, ata):
-        txt = f"4.2 Valor total dos preços registrados: {format_money(ata.valor_total, 2)} ({valor_extenso(ata.valor_total)})."
+        body = f"Valor total dos preços registrados: {format_money(ata.valor_total, 2)} ({valor_extenso(ata.valor_total)})."
         for p in doc.paragraphs:
             if "Valor total dos preços registrados" in p.text:
+                txt = body if self.paragraph_has_numbering(p) else f"4.2 {body}"
                 self.set_paragraph_text_keep_style(p, txt)
                 return
+
+    def paragraph_has_numbering(self, p):
+        ppr = p._p.pPr
+        return bool(ppr is not None and ppr.numPr is not None)
 
     # ------------------- APÊNDICE -------------------
     def replace_appendix(self, doc, ata):

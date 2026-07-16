@@ -171,12 +171,17 @@ class ModelBasedAtaGenerator:
             extenso = valor_por_extenso(ata.valor_total)
         except Exception:
             extenso = ""
-        novo = f"4.2 Valor total dos preços registrados: {valor} ({extenso})."
+        body = f"Valor total dos preços registrados: {valor} ({extenso})."
 
         for p in doc.paragraphs:
             if "Valor total dos preços registrados" in p.text:
+                novo = body if self.paragraph_has_numbering(p) else f"4.2 {body}"
                 self.set_paragraph_text(p, novo)
                 return
+
+    def paragraph_has_numbering(self, p):
+        ppr = p._p.pPr
+        return bool(ppr is not None and ppr.numPr is not None)
 
     # ------------------------ apêndice ------------------------
     def replace_appendix_table(self, doc, ata):
