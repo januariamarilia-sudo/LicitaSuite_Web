@@ -34,6 +34,10 @@ ATAS_DIR = OUTPUT_DIR / "atas_geradas"
 LOGO_PATH = BASE_DIR / "assets" / "logo_icismep_cl.png"
 
 
+def html_block(markup):
+    return "\n".join(line.strip() for line in str(markup).splitlines() if line.strip())
+
+
 def find_engine():
     if str(BASE_DIR) not in sys.path:
         sys.path.insert(0, str(BASE_DIR))
@@ -173,7 +177,7 @@ def render_preview(status_data):
     itens_nao = status_data.get("itens_sem_vencedor", [])
 
     if not fornecedores and not itens_nao:
-        return """
+        return html_block("""
         <div class="ls-preview">
             <div class="ls-preview-title">Prévia da geração</div>
             <p>Após o envio, você verá as atas identificadas e os itens correspondentes.</p>
@@ -188,7 +192,7 @@ def render_preview(status_data):
                 </div>
             </div>
         </div>
-        """
+        """)
 
     linhas = []
 
@@ -202,7 +206,7 @@ def render_preview(status_data):
 
     itens_txt = ", ".join(str(i) for i in itens_nao) if itens_nao else "Nenhum item sem localização."
 
-    return f"""
+    return html_block(f"""
     <div class="ls-preview">
         <div class="ls-preview-title">Prévia da geração</div>
         <p>Dados identificados pelo motor do LicitaSuite.</p>
@@ -219,7 +223,7 @@ def render_preview(status_data):
             </div>
         </div>
     </div>
-    """
+    """)
 
 
 def main():
@@ -282,7 +286,7 @@ def main():
         preview_html = render_preview(st.session_state.status_data)
 
         st.markdown(
-            f"""
+            html_block(f"""
             <div class="ls-card">
                 <div class="ls-status-head">
                     <div class="ls-card-title-row" style="margin-bottom:0;">
@@ -296,7 +300,7 @@ def main():
                 </div>
                 {preview_html}
             </div>
-            """,
+            """),
             unsafe_allow_html=True,
         )
 
