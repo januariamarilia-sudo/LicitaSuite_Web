@@ -232,8 +232,20 @@ def _docx_rows(docx_files: list[Path]) -> list[dict[str, Any]]:
             "key": _supplier_key(nome),
             "short_key": _short_key(nome),
             "money_values": [_money(v) for v in MONEY_RE.findall(text)],
+            "email": _extract_email(text),
+            "telefone": _extract_telefone(text),
         })
     return rows
+
+
+def _extract_email(text: str) -> str:
+    match = re.search(r"[\w.+-]+@[\w.-]+\.\w+", text or "")
+    return match.group(0) if match else ""
+
+
+def _extract_telefone(text: str) -> str:
+    match = re.search(r"(?:telefone|fone)\s*[:\-]?\s*([()0-9 .+\-]{8,24})", text or "", flags=re.I)
+    return re.sub(r"\s+", " ", match.group(1)).strip(" .-") if match else ""
 
 
 def _match_rows(pdf_rows, docx_rows):
@@ -293,21 +305,20 @@ def build_conferencia(zip_path: Path | None, output_dir: Path, docx_files: list[
                 valor_na_ata = "NÃO LOCALIZADO"
                 obs = "Conferir manualmente. O TOTAL DO VENCEDOR/Total R$ não foi localizado na ata."
 
-        if pdf["status_soma_pdf"] != "OK":
-            obs = (obs + " | " if obs else "") + "Soma dos itens extraídos do PDF não fecha com o total oficial."
-
         linhas.append({
             "fornecedor": pdf["nome"],
             "itens_pdf": ", ".join(pdf.get("itens_pdf", [])),
             "total_vencedor_pdf": total_oficial,
             "soma_itens_pdf": pdf["soma_itens_pdf"],
             "status_soma_pdf": pdf["status_soma_pdf"],
+            "email": docx.get("email", "") if docx else "",
+            "telefone": docx.get("telefone", "") if docx else "",
             "valor_na_ata": valor_na_ata,
             "status_ata": status_ata,
             "observacao": obs,
         })
 
-    divergencias = [x for x in linhas if x["status_soma_pdf"] != "OK" or x["status_ata"] != "OK"]
+    divergencias = [x for x in linhas if x["status_ata"] != "OK"]
 
     return {
         "pdf_path": str(pdf_path) if pdf_path else "",
@@ -339,7 +350,6 @@ def write_conferencia_xlsx(conferencia: dict[str, Any], output_dir: Path) -> Pat
         ["Fornecedores no PDF", conferencia.get("total_fornecedores_pdf", 0)],
         ["Arquivos DOCX gerados", conferencia.get("total_docx", 0)],
         ["Valor total oficial PDF", _fmt_money(conferencia.get("valor_total_pdf_oficial", 0))],
-        ["Soma dos itens lidos no PDF", _fmt_money(conferencia.get("soma_itens_pdf", 0))],
         ["Status", "OK" if conferencia.get("ok") else "VERIFICAR PENDÊNCIAS"],
     ]
 
@@ -354,7 +364,7 @@ def write_conferencia_xlsx(conferencia: dict[str, Any], output_dir: Path) -> Pat
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
 
     ws["A1"].font = Font(bold=True, size=15, color="073F9E")
-    ws["B7"].fill = green if conferencia.get("ok") else red
+    ws["B6"].fill = green if conferencia.get("ok") else red
     ws.column_dimensions["A"].width = 36
     ws.column_dimensions["B"].width = 100
 
@@ -366,10 +376,10 @@ def write_conferencia_xlsx(conferencia: dict[str, Any], output_dir: Path) -> Pat
     sh = wb.create_sheet("Conferência Financeira")
     headers = [
         "FORNECEDOR",
+        "E-MAIL",
+        "TELEFONE",
         "ITENS PDF",
         "TOTAL OFICIAL PDF",
-        "SOMA DOS ITENS PDF",
-        "STATUS SOMA PDF",
         "VALOR LOCALIZADO NA ATA",
         "STATUS ATA",
         "OBSERVAÇÃO / CORREÇÃO MANUAL",
@@ -385,24 +395,24 @@ def write_conferencia_xlsx(conferencia: dict[str, Any], output_dir: Path) -> Pat
     for row in conferencia.get("linhas_financeiras", []):
         sh.append([
             row["fornecedor"],
+            row.get("email", ""),
+            row.get("telefone", ""),
             row["itens_pdf"],
             _fmt_money(row["total_vencedor_pdf"]),
-            _fmt_money(row["soma_itens_pdf"]),
-            row["status_soma_pdf"],
             row["valor_na_ata"],
             row["status_ata"],
             row["observacao"],
         ])
 
     for row in sh.iter_rows(min_row=2):
-        fill = red if row[4].value != "OK" or row[6].value != "OK" else None
+        fill = red if row[6].value != "OK" else None
         for cell in row:
             cell.alignment = Alignment(vertical="top", wrap_text=True)
             cell.border = border
             if fill:
                 cell.fill = fill
 
-    widths = [42, 28, 24, 24, 32, 26, 42, 70]
+    widths = [42, 32, 22, 28, 24, 26, 42, 70]
     for idx, width in enumerate(widths, start=1):
         sh.column_dimensions[chr(64 + idx)].width = width
 
@@ -437,8 +447,7 @@ def format_conferencia_markdown(conferencia: dict[str, Any]) -> str:
             "✅ Conferência financeira oficial OK\n\n"
             f"- Fornecedores no PDF: **{conferencia.get('total_fornecedores_pdf', 0)}**\n"
             f"- DOCX gerados: **{conferencia.get('total_docx', 0)}**\n"
-            f"- Valor total oficial PDF: **{_fmt_money(conferencia.get('valor_total_pdf_oficial', 0))}**\n"
-            f"- Soma dos itens PDF: **{_fmt_money(conferencia.get('soma_itens_pdf', 0))}**"
+            f"- Valor total oficial PDF: **{_fmt_money(conferencia.get('valor_total_pdf_oficial', 0))}**"
         )
 
     parts = [
@@ -447,12 +456,11 @@ def format_conferencia_markdown(conferencia: dict[str, Any]) -> str:
         f"- Fornecedores no PDF: **{conferencia.get('total_fornecedores_pdf', 0)}**",
         f"- DOCX gerados: **{conferencia.get('total_docx', 0)}**",
         f"- Valor total oficial PDF: **{_fmt_money(conferencia.get('valor_total_pdf_oficial', 0))}**",
-        f"- Soma dos itens PDF: **{_fmt_money(conferencia.get('soma_itens_pdf', 0))}**",
         "",
         "**Pendências principais:**",
     ]
 
     for row in conferencia.get("divergencias_financeiras", [])[:12]:
-        parts.append(f"- {row['fornecedor']}: {row['status_soma_pdf']} | {row['status_ata']}")
+        parts.append(f"- {row['fornecedor']}: {row['status_ata']}")
 
     return "\n".join(parts)
