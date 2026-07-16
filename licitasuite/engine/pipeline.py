@@ -1,7 +1,9 @@
 from dataclasses import dataclass, field
+import re
 
 from licitasuite.core.zip_loader import ZipLoader
 from licitasuite.core.file_detector import FileDetector
+from licitasuite.models.item_apendice import ItemApendice
 from licitasuite.parsers.appendix_parser import AppendixParser
 from licitasuite.parsers.pdf_winners_parser import PdfWinnersParser
 from licitasuite.engine.cross_checker import CrossChecker
@@ -38,7 +40,10 @@ class Pipeline:
                 return PipelineResult(False, messages, ["Arquivos obrigatórios ausentes: " + ", ".join(detected.missing())])
 
             messages.append(f"Modelo usado: {detected.modelo_ata}")
-            messages.append(f"Apêndice usado: {detected.apendice}")
+            if getattr(detected, "apendice_embutido", False):
+                messages.append(f"Apêndice usado: {detected.apendice} (tabela dentro do modelo da ata)")
+            else:
+                messages.append(f"Apêndice usado: {detected.apendice}")
             messages.append(f"PDF usado: {detected.vencedores_pdf}")
 
             if detected.banco_fornecedores:
@@ -46,10 +51,18 @@ class Pipeline:
             else:
                 messages.append("Banco de fornecedores: não enviado")
 
-            appendix_parser = AppendixParser()
-            apendice = appendix_parser.parse(detected.apendice)
             fornecedores = PdfWinnersParser().parse(detected.vencedores_pdf)
-            messages.extend(appendix_parser.diagnostics)
+
+            if getattr(detected, "apendice_embutido", False):
+                apendice = self._build_virtual_appendix_from_winners(fornecedores)
+                messages.append(
+                    "Apêndice separado não enviado: itens oficiais montados a partir do PDF de vencedores."
+                )
+            else:
+                appendix_parser = AppendixParser()
+                apendice = appendix_parser.parse(detected.apendice)
+                messages.extend(appendix_parser.diagnostics)
+
             messages.append(f"Itens no Apêndice: {len(apendice)}")
             messages.append(f"Fornecedores reais identificados: {len(fornecedores)}")
 
@@ -101,3 +114,40 @@ class Pipeline:
 
         except Exception as exc:
             return PipelineResult(False, messages, [str(exc)])
+
+    def _build_virtual_appendix_from_winners(self, fornecedores):
+        itens = []
+        seen = set()
+        for fornecedor in fornecedores:
+            for item in fornecedor.itens:
+                if item.numero_item in seen:
+                    continue
+                seen.add(item.numero_item)
+                descricao = self._winner_description(item)
+                quantidade = item.quantidade_pdf or 0
+                itens.append(ItemApendice(
+                    numero_item=item.numero_item,
+                    codigo_siplan="",
+                    descricao=descricao,
+                    apresentacao="",
+                    total=quantidade,
+                    cells_text=[
+                        "",
+                        str(item.numero_item),
+                        descricao,
+                        "",
+                        str(int(quantidade)) if float(quantidade or 0).is_integer() else str(quantidade),
+                    ],
+                ))
+        return itens
+
+    def _winner_description(self, item):
+        text = str(getattr(item, "linha_origem", "") or "").strip()
+        text = text.split("|", 1)[0].strip()
+        text = re.sub(r"^\d+\s+", "", text)
+        qty_money = re.search(r"\s+\d{1,3}(?:\.\d{3})*\s*[A-ZÇ]{0,8}\s+R\$", text, flags=re.I)
+        if qty_money:
+            text = text[:qty_money.start()].strip()
+        else:
+            text = re.split(r"\s+R\$", text, maxsplit=1)[0].strip()
+        return text or getattr(item, "marca", "") or f"Item {item.numero_item}"

@@ -1,13 +1,15 @@
 from pathlib import Path
 from docx import Document
+from licitasuite.parsers.appendix_parser import AppendixParser
 from licitasuite.parsers.text_utils import normalize_text
 
 class DetectedFiles:
-    def __init__(self, modelo_ata=None, apendice=None, vencedores_pdf=None, banco_fornecedores=None):
+    def __init__(self, modelo_ata=None, apendice=None, vencedores_pdf=None, banco_fornecedores=None, apendice_embutido=False):
         self.modelo_ata = modelo_ata
         self.apendice = apendice
         self.vencedores_pdf = vencedores_pdf
         self.banco_fornecedores = banco_fornecedores
+        self.apendice_embutido = apendice_embutido
 
     def missing(self):
         missing = []
@@ -30,6 +32,7 @@ class FileDetector:
 
         apendice = None
         modelo = None
+        apendice_embutido = False
 
         for docx in docs:
             name = normalize_text(docx.name)
@@ -55,6 +58,13 @@ class FileDetector:
                     modelo = docx
                     break
 
+        if not apendice and modelo and self._has_appendix_table(modelo):
+            apendice = modelo
+            apendice_embutido = True
+
+        if apendice and modelo and apendice == modelo and "APENDICE" not in normalize_text(apendice.name):
+            apendice_embutido = True
+
         vencedores = None
         for pdf in pdfs:
             if "vencedor" in pdf.name.lower():
@@ -72,4 +82,11 @@ class FileDetector:
         if not banco and xlsxs:
             banco = xlsxs[0]
 
-        return DetectedFiles(modelo, apendice, vencedores, banco)
+        return DetectedFiles(modelo, apendice, vencedores, banco, apendice_embutido)
+
+    def _has_appendix_table(self, docx):
+        try:
+            itens = AppendixParser().parse(docx)
+        except Exception:
+            return False
+        return len(itens) > 0
