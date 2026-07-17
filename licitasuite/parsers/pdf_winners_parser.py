@@ -225,6 +225,19 @@ class PdfWinnersParser:
         numero = int(m.group("codigo"))
         body = self._clean_spaces(m.group("body"))
 
+        # Caminho principal: quantidade/unidade + valor unitario + valor total.
+        money = MONEY_PAIR_RE.search(body)
+        if money:
+            before = body[:money.start()].strip()
+            return ItemFornecedor(
+                numero_item=numero,
+                marca=self._guess_brand(before),
+                quantidade_pdf=parse_number(money.group("qtd")),
+                valor_unitario=parse_number(money.group("unit")),
+                valor_total=parse_number(money.group("total")),
+                linha_origem=row,
+            )
+
         # Caminho preferencial: quantidade/unidade antes de R$.
         qtd_un = QTD_UN_RE.search(body)
 
@@ -261,19 +274,6 @@ class PdfWinnersParser:
                         valor_total=parse_number(total_text),
                         linha_origem=row,
                     )
-
-        # Fallback para linha perfeita.
-        money = MONEY_PAIR_RE.search(body)
-        if money:
-            before = body[:money.start()].strip()
-            return ItemFornecedor(
-                numero_item=numero,
-                marca=self._guess_brand(before),
-                quantidade_pdf=parse_number(money.group("qtd")),
-                valor_unitario=parse_number(money.group("unit")),
-                valor_total=parse_number(money.group("total")),
-                linha_origem=row,
-            )
 
         return ItemFornecedor(
             numero_item=numero,

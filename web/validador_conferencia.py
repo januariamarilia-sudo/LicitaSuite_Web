@@ -354,9 +354,9 @@ def build_conferencia(zip_path: Path | None, output_dir: Path, docx_files: list[
         key = pdf_ref.get("key", "") if pdf_ref else pdf.get("key", "")
         docx = matched.get(key) or _find_matching_row(pdf, docx_rows)
         total_oficial = (
-            pdf.get("valor_total") or pdf.get("valor")
-            if report_rows and (pdf.get("valor_total") or pdf.get("valor"))
-            else pdf_ref.get("total_oficial_vencedor") if pdf_ref and pdf_ref.get("total_oficial_vencedor") else 0
+            pdf_ref.get("total_oficial_vencedor")
+            if pdf_ref and pdf_ref.get("total_oficial_vencedor")
+            else pdf.get("valor_total") or pdf.get("valor") or 0
         )
         total_oficial = _money(total_oficial)
         status_ata = "DOCX NÃO LOCALIZADO"
