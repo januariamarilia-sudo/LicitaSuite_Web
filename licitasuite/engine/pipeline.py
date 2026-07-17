@@ -124,20 +124,15 @@ class Pipeline:
                     continue
                 seen.add(item.numero_item)
                 descricao = self._winner_description(item)
+                unidade = self._winner_unit(item)
                 quantidade = item.quantidade_pdf or 0
                 itens.append(ItemApendice(
                     numero_item=item.numero_item,
-                    codigo_siplan="",
+                    codigo_siplan="-",
                     descricao=descricao,
-                    apresentacao="",
+                    apresentacao=unidade or "-",
                     total=quantidade,
-                    cells_text=[
-                        "",
-                        str(item.numero_item),
-                        descricao,
-                        "",
-                        str(int(quantidade)) if float(quantidade or 0).is_integer() else str(quantidade),
-                    ],
+                    cells_text=[],
                 ))
         return itens
 
@@ -151,3 +146,9 @@ class Pipeline:
         else:
             text = re.split(r"\s+R\$", text, maxsplit=1)[0].strip()
         return text or getattr(item, "marca", "") or f"Item {item.numero_item}"
+
+    def _winner_unit(self, item):
+        text = str(getattr(item, "linha_origem", "") or "").strip()
+        text = text.split("|", 1)[0].strip()
+        match = re.search(r"\s+\d{1,3}(?:\.\d{3})*\s*([A-ZÃ‡]{1,8})\s+R\$", text, flags=re.I)
+        return match.group(1).upper() if match else ""

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from zipfile import ZipFile, ZIP_DEFLATED
+import json
 import re
 import xml.etree.ElementTree as ET
 from typing import Any
@@ -66,6 +67,60 @@ def _supplier_key(name: Any) -> str:
 
 def _short_key(name: Any) -> str:
     return " ".join(_supplier_key(name).split()[:2])
+
+
+def _load_engine_report_rows(output_dir: Path) -> list[dict[str, Any]]:
+    candidates = [
+        output_dir / "relatorio_conferencia.json",
+        output_dir.parent / "relatorio_conferencia.json",
+        Path("output") / "relatorio_conferencia.json",
+    ]
+
+    data = None
+    for path in candidates:
+        if not path.exists():
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            break
+        except Exception:
+            data = None
+
+    if not data:
+        return []
+
+    rows = data.get("fornecedores", []) or data.get("atas", []) or []
+    normalized = []
+    for row in rows:
+        nome = row.get("nome") or row.get("fornecedor") or row.get("contratado") or ""
+        normalized.append({
+            **row,
+            "nome": nome,
+            "key": _supplier_key(nome),
+            "short_key": _short_key(nome),
+        })
+    return normalized
+
+
+def _find_matching_row(base: dict[str, Any], candidates: list[dict[str, Any]]) -> dict[str, Any] | None:
+    key = base.get("key", "")
+    short = base.get("short_key", "")
+    for row in candidates:
+        rk = row.get("key", "")
+        rs = row.get("short_key", "")
+        key_first = key.split()[0] if key.split() else ""
+        rk_first = rk.split()[0] if rk.split() else ""
+        if key and rk and key == rk:
+            return row
+        if short and rs and short == rs:
+            return row
+        if key_first and rk_first and len(key_first) >= 3 and key_first == rk_first:
+            return row
+        if key and rk and min(len(key), len(rk)) >= 6 and (key in rk or rk in key):
+            return row
+        if short and rk and len(short) >= 6 and short in rk:
+            return row
+    return None
 
 
 def _prepare_text(text: str) -> str:
@@ -258,13 +313,21 @@ def _match_rows(pdf_rows, docx_rows):
         for docx in docx_rows:
             dk = docx.get("key", "")
             ds = docx.get("short_key", "")
-            if key and dk and (key == dk or key in dk or dk in key):
+            key_first = key.split()[0] if key.split() else ""
+            dk_first = dk.split()[0] if dk.split() else ""
+            if key and dk and key == dk:
                 found = docx
                 break
             if short and ds and short == ds:
                 found = docx
                 break
-            if short and dk and short in dk:
+            if key_first and dk_first and len(key_first) >= 3 and key_first == dk_first:
+                found = docx
+                break
+            if key and dk and min(len(key), len(dk)) >= 6 and (key in dk or dk in key):
+                found = docx
+                break
+            if short and dk and len(short) >= 6 and short in dk:
                 found = docx
                 break
 
@@ -277,18 +340,25 @@ def _match_rows(pdf_rows, docx_rows):
 def build_conferencia(zip_path: Path | None, output_dir: Path, docx_files: list[Path]) -> dict[str, Any]:
     pdf_path = _find_pdf_in_zip_or_folder(zip_path)
     pdf_rows = _parse_pdf_financeiro(pdf_path) if pdf_path else []
+    report_rows = _load_engine_report_rows(output_dir)
     docx_rows = _docx_rows(docx_files)
 
     matched = _match_rows(pdf_rows, docx_rows)
 
     linhas = []
     faltando_docx = []
+    base_rows = report_rows or pdf_rows
 
-    for pdf in pdf_rows:
-        key = pdf["key"]
-        docx = matched.get(key)
-        total_oficial = pdf["total_oficial_vencedor"]
-
+    for pdf in base_rows:
+        pdf_ref = _find_matching_row(pdf, pdf_rows) if report_rows else pdf
+        key = pdf_ref.get("key", "") if pdf_ref else pdf.get("key", "")
+        docx = matched.get(key) or _find_matching_row(pdf, docx_rows)
+        total_oficial = (
+            pdf.get("valor_total") or pdf.get("valor")
+            if report_rows and (pdf.get("valor_total") or pdf.get("valor"))
+            else pdf_ref.get("total_oficial_vencedor") if pdf_ref and pdf_ref.get("total_oficial_vencedor") else 0
+        )
+        total_oficial = _money(total_oficial)
         status_ata = "DOCX NÃO LOCALIZADO"
         valor_na_ata = ""
         obs = ""
@@ -307,12 +377,12 @@ def build_conferencia(zip_path: Path | None, output_dir: Path, docx_files: list[
 
         linhas.append({
             "fornecedor": pdf["nome"],
-            "itens_pdf": ", ".join(pdf.get("itens_pdf", [])),
+            "itens_pdf": ", ".join(str(i).zfill(4) for i in (pdf.get("itens") or (pdf_ref.get("itens_pdf", []) if pdf_ref else []))),
             "total_vencedor_pdf": total_oficial,
-            "soma_itens_pdf": pdf["soma_itens_pdf"],
-            "status_soma_pdf": pdf["status_soma_pdf"],
-            "email": docx.get("email", "") if docx else "",
-            "telefone": docx.get("telefone", "") if docx else "",
+            "soma_itens_pdf": pdf_ref.get("soma_itens_pdf", total_oficial) if pdf_ref else total_oficial,
+            "status_soma_pdf": pdf_ref.get("status_soma_pdf", "OK") if pdf_ref else "OK",
+            "email": pdf.get("email") or pdf.get("e_mail") or (docx.get("email", "") if docx else ""),
+            "telefone": pdf.get("telefone") or pdf.get("fone") or (docx.get("telefone", "") if docx else ""),
             "valor_na_ata": valor_na_ata,
             "status_ata": status_ata,
             "observacao": obs,
@@ -322,10 +392,10 @@ def build_conferencia(zip_path: Path | None, output_dir: Path, docx_files: list[
 
     return {
         "pdf_path": str(pdf_path) if pdf_path else "",
-        "total_fornecedores_pdf": len(pdf_rows),
+        "total_fornecedores_pdf": len(base_rows) if base_rows else len(pdf_rows),
         "total_docx": len(docx_files),
-        "valor_total_pdf_oficial": sum(x["total_oficial_vencedor"] for x in pdf_rows),
-        "soma_itens_pdf": sum(x["soma_itens_pdf"] for x in pdf_rows),
+        "valor_total_pdf_oficial": sum(x["total_vencedor_pdf"] for x in linhas),
+        "soma_itens_pdf": sum(x["soma_itens_pdf"] for x in linhas),
         "faltando_docx": faltando_docx,
         "linhas_financeiras": linhas,
         "divergencias_financeiras": divergencias,
@@ -349,7 +419,7 @@ def write_conferencia_xlsx(conferencia: dict[str, Any], output_dir: Path) -> Pat
         ["PDF usado", conferencia.get("pdf_path", "")],
         ["Fornecedores no PDF", conferencia.get("total_fornecedores_pdf", 0)],
         ["Arquivos DOCX gerados", conferencia.get("total_docx", 0)],
-        ["Valor total oficial PDF", _fmt_money(conferencia.get("valor_total_pdf_oficial", 0))],
+        ["Valor total", _fmt_money(conferencia.get("valor_total_pdf_oficial", 0))],
         ["Status", "OK" if conferencia.get("ok") else "VERIFICAR PENDÊNCIAS"],
     ]
 
@@ -379,7 +449,7 @@ def write_conferencia_xlsx(conferencia: dict[str, Any], output_dir: Path) -> Pat
         "E-MAIL",
         "TELEFONE",
         "ITENS PDF",
-        "TOTAL OFICIAL PDF",
+        "VALOR TOTAL",
         "VALOR LOCALIZADO NA ATA",
         "STATUS ATA",
         "OBSERVAÇÃO / CORREÇÃO MANUAL",

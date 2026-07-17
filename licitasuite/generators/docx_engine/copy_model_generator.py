@@ -341,6 +341,7 @@ class CopyModelAtaGenerator:
         if table is None:
             return
 
+        mapping = self.map_appendix_columns(table)
         data_idx = 1 if len(table.rows) > 1 else 0
         data_template = deepcopy(table.rows[data_idx]._tr)
 
@@ -352,20 +353,65 @@ class CopyModelAtaGenerator:
             row = table.rows[-1]
             self.clear_row_text_only(row)
 
-            values = item.appendix_cells_text or [
-                item.codigo_siplan,
-                str(item.numero_item),
-                item.descricao_oficial,
-                item.apresentacao,
-                format_qty(item.quantidade),
-            ]
+            values = item.appendix_cells_text or []
+            if values and len(values) >= len(row.cells):
+                self.write_appendix_values(row, values)
+            else:
+                self.write_appendix_item(row, mapping, item)
 
-            for i, v in enumerate(values):
-                if i < len(row.cells):
-                    if i == 2:
-                        self.set_description_cell(row.cells[i], v)
-                    else:
-                        self.set_cell_text_keep_style(row.cells[i], v)
+    def write_appendix_values(self, row, values):
+        for i, v in enumerate(values):
+            if i < len(row.cells):
+                if i == 2:
+                    self.set_description_cell(row.cells[i], v)
+                else:
+                    self.set_cell_text_keep_style(row.cells[i], v)
+
+    def write_appendix_item(self, row, mapping, item):
+        data = {
+            "codigo": item.codigo_siplan,
+            "item": str(item.numero_item),
+            "descricao": item.descricao_oficial,
+            "apresentacao": item.apresentacao,
+            "total": format_qty(item.quantidade, use_thousands=True),
+        }
+        for key, value in data.items():
+            idx = mapping.get(key)
+            if idx is None or idx >= len(row.cells):
+                continue
+            if key == "descricao":
+                self.set_description_cell(row.cells[idx], value)
+            else:
+                self.set_cell_text_keep_style(row.cells[idx], value)
+
+    def map_appendix_columns(self, table):
+        if not table.rows:
+            return {}
+
+        headers = [normalize_text(c.text) for c in table.rows[0].cells]
+        mapping = {}
+        for idx, header in enumerate(headers):
+            if not header:
+                continue
+            if "codigo" not in mapping and ("SIPLAN" in header or "CODIGO" in header or header == "COD"):
+                mapping["codigo"] = idx
+            elif "item" not in mapping and re.search(r"\bITEM\b", header):
+                mapping["item"] = idx
+            elif "descricao" not in mapping and ("DESCRIT" in header or "DESCRICAO" in header):
+                mapping["descricao"] = idx
+            elif "apresentacao" not in mapping and ("APRESENT" in header or "UNIDADE" in header or header == "UN"):
+                mapping["apresentacao"] = idx
+            elif "total" not in mapping and (
+                "DEMANDA TOTAL" in header
+                or "TOTAL ENTES" in header
+                or "CONSORCIADOS" in header
+                or header == "TOTAL"
+            ):
+                mapping["total"] = idx
+
+        if "total" not in mapping and headers:
+            mapping["total"] = len(headers) - 1
+        return mapping
 
     def find_appendix_table(self, doc):
         best = None
